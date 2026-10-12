@@ -51,11 +51,20 @@ function claudeSays(category) {
 const tests = {
   'VIP sender rule matches by domain without calling Claude'() {
     const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('None') });
+    vm.runInContext("CONFIG.RULES[0].from = ['@dream-company.com']", context);
     const msg = fakeMessage({ from: 'Jane <jane@dream-company.com>', subject: 'Hello' });
     const result = vm.runInContext('classify_', context)(msg);
     assert.strictEqual(result.category.label, 'VIP');
     assert.strictEqual(result.source, 'rule');
     assert.strictEqual(fetchCalls.length, 0);
+  },
+
+  'empty VIP list matches nothing, so portal replies still reach Claude'() {
+    const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('Jobs/Interview') });
+    const msg = fakeMessage({ from: 'Naukri <info@naukri.com>', subject: 'You have been shortlisted' });
+    const result = vm.runInContext('classify_', context)(msg);
+    assert.strictEqual(result.category.label, 'Jobs/Interview');
+    assert.strictEqual(fetchCalls.length, 1);
   },
 
   'rule with from + keywords needs both to match'() {

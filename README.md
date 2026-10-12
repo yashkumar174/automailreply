@@ -4,17 +4,18 @@ Never miss the email that matters. AutoSort runs inside your Google account ever
 10 minutes and labels new inbox mail, so an interview invite can't hide under 40
 job alerts.
 
-- **Rules first (free):** "anything from `@dream-company.com` → `AutoSort/VIP`, star it".
-- **Claude for everything else:** reads emails no rule caught and tells apart an
-  interview invite, an offer, a rejection and a plain "we received your application".
+- **Claude reads your new mail** and tells apart an interview invite, an offer, a
+  rejection and a plain "we received your application", from any company or job
+  portal. You don't need to know who will write to you.
+- **Optional rules (free):** "anything from `@dream-company.com` → `AutoSort/VIP`, star it".
 - You choose the categories: add, rename or remove them in one file.
 
 Default labels:
 
 | Label | Comes from | Extra |
 |---|---|---|
-| `AutoSort/VIP` | your sender list | starred + important |
-| `AutoSort/Job Alerts` | LinkedIn / Indeed / Glassdoor / Naukri alerts | archived out of the inbox |
+| `AutoSort/VIP` | your sender list (empty until you add some) | starred + important |
+| `AutoSort/Job Alerts` | LinkedIn / Indeed / Naukri job alerts | archived out of the inbox |
 | `AutoSort/Jobs/Offer` | Claude | starred + important |
 | `AutoSort/Jobs/Interview` | Claude | starred + important |
 | `AutoSort/Jobs/Rejected` | Claude | |
@@ -30,7 +31,8 @@ Emails that fit nothing are left exactly as they were.
 2. **Add the code.** In the editor:
    - Replace the contents of `Code.gs` with [`src/Code.js`](src/Code.js).
    - Click **+** → **Script**, name it `Config`, and paste [`src/Config.js`](src/Config.js).
-3. **Edit `Config`.** At minimum, put your real must-not-miss senders in the `VIP` rule.
+3. **Edit `Config` (optional).** If there are people you already know you never want to
+   miss, add them to the `VIP` rule. Otherwise leave it empty.
 4. **Add your Claude API key.** Get one at [console.anthropic.com](https://console.anthropic.com)
    (add a small amount of credit). Then in the script editor: **Project Settings** (gear icon)
    → **Script properties** → **Add script property**:

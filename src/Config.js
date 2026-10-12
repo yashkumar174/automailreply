@@ -27,20 +27,24 @@ const CONFIG = {
   // ---------------------------------------------------------------------------
   RULES: [
     {
-      // People you never want to miss. Replace these with real addresses.
+      // OPTIONAL. You don't need this to catch job replies: Claude reads every
+      // email no rule matched, whoever sent it. Add addresses here only for
+      // people you already know you never want to miss, e.g.
+      //   from: ['priya.recruiter@gmail.com', '@dream-company.com'],
       label: 'VIP',
-      from: ['someone-important@example.com', '@dream-company.com'],
+      from: [],
       star: true,
       important: true,
     },
     {
       // Automated job-board alerts: useful, but they bury the real replies.
+      // Only addresses that send nothing but alerts belong here, because
+      // matching mail is archived without Claude reading it.
       label: 'Job Alerts',
       from: [
         'jobalerts-noreply@linkedin.com',
         'jobs-listings@linkedin.com',
         'alert@indeed.com',
-        'noreply@glassdoor.com',
         'jobalert@naukri.com',
       ],
       archive: true,
@@ -62,7 +66,8 @@ const CONFIG = {
       label: 'Jobs/Interview',
       description:
         'Positive progress on a job application: interview invitation or scheduling, phone screen, ' +
-        'online assessment or coding test, "we would like to move forward", shortlisted, or a recruiter ' +
+        'online assessment or coding test, "we would like to move forward", selected or shortlisted for the ' +
+        'next round (including job-portal notifications like Naukri or LinkedIn saying so), or a recruiter ' +
         'asking for availability or more information to continue the process.',
       star: true,
       important: true,
