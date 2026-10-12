@@ -7,12 +7,13 @@ const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
 
-function loadScript({ fetchResponse } = {}) {
+function loadScript({ fetchResponse, props = { ANTHROPIC_API_KEY: 'test-key' } } = {}) {
   const fetchCalls = [];
+  const warnings = [];
   const context = {
-    console: { log() {}, warn() {}, error() {} },
+    console: { log() {}, warn: (m) => warnings.push(m), error() {} },
     PropertiesService: {
-      getScriptProperties: () => ({ getProperty: (k) => (k === 'ANTHROPIC_API_KEY' ? 'test-key' : null) }),
+      getScriptProperties: () => ({ getProperty: (k) => props[k] || null }),
     },
     UrlFetchApp: {
       fetch(url, options) {
@@ -28,12 +29,15 @@ function loadScript({ fetchResponse } = {}) {
   for (const file of ['Config.js', 'Code.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8'), context, { filename: file });
   }
-  return { context, fetchCalls };
+  return { context, fetchCalls, warnings };
 }
 
-function fakeMessage({ from, subject = '', body = '' }) {
-  return { getFrom: () => from, getSubject: () => subject, getPlainBody: () => body };
+function fakeMessage({ from, subject = '', body = '', date = new Date() }) {
+  return { getFrom: () => from, getSubject: () => subject, getPlainBody: () => body, getDate: () => date };
 }
+
+const fakeThread = { getId: () => 'thread123' };
+const interview = { label: 'Jobs/Interview', notify: true };
 
 function claudeSays(category) {
   return {
@@ -123,6 +127,37 @@ const tests = {
   'API errors throw so the email is retried next run'() {
     const { context } = loadScript({ fetchResponse: { status: 529, body: { error: 'overloaded' } } });
     assert.throws(() => vm.runInContext('classify_', context)(fakeMessage({ from: 'x@y.com' })), /529/);
+  },
+
+  'interview email sends a phone alert via ntfy'() {
+    const { context, fetchCalls } = loadScript({ fetchResponse: { status: 200, body: {} }, props: { NTFY_TOPIC: 'my-topic' } });
+    const msg = fakeMessage({ from: '"Acme Talent" <no-reply@greenhouse.io>', subject: 'Next steps 🎉' });
+    vm.runInContext('notify_', context)(fakeThread, msg, interview);
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(fetchCalls[0].url, 'https://ntfy.sh');
+    const p = fetchCalls[0].payload;
+    assert.strictEqual(p.topic, 'my-topic');
+    assert.strictEqual(p.title, 'Interview: Acme Talent');
+    assert.strictEqual(p.message, 'Next steps 🎉');
+    assert.strictEqual(p.priority, 4);
+    assert.strictEqual(p.click, 'https://mail.google.com/mail/u/0/#all/thread123');
+  },
+
+  'no alert without a topic or for old emails'() {
+    let { context, fetchCalls } = loadScript({ fetchResponse: { status: 200, body: {} }, props: {} });
+    vm.runInContext('notify_', context)(fakeThread, fakeMessage({ from: 'a@b.com' }), interview);
+    assert.strictEqual(fetchCalls.length, 0);
+
+    ({ context, fetchCalls } = loadScript({ fetchResponse: { status: 200, body: {} }, props: { NTFY_TOPIC: 't' } }));
+    const old = fakeMessage({ from: 'a@b.com', date: new Date(Date.now() - 3 * 24 * 3600 * 1000) });
+    vm.runInContext('notify_', context)(fakeThread, old, interview);
+    assert.strictEqual(fetchCalls.length, 0);
+  },
+
+  'a failed alert is logged, not thrown'() {
+    const { context, warnings } = loadScript({ fetchResponse: { status: 500, body: {} }, props: { NTFY_TOPIC: 't' } });
+    vm.runInContext('notify_', context)(fakeThread, fakeMessage({ from: 'a@b.com' }), interview);
+    assert.match(warnings[0], /Phone alert failed: ntfy returned 500/);
   },
 
   'sender address is extracted from display-name format'() {

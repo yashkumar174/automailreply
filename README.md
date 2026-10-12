@@ -14,10 +14,10 @@ Default labels:
 
 | Label | Comes from | Extra |
 |---|---|---|
-| `AutoSort/VIP` | your sender list (empty until you add some) | starred + important |
+| `AutoSort/VIP` | your sender list (empty until you add some) | starred + important + phone alert |
 | `AutoSort/Job Alerts` | known LinkedIn / Indeed / Naukri alert senders, plus other portal alerts Claude spots | known senders are archived; ones Claude spots stay in the inbox |
-| `AutoSort/Jobs/Offer` | Claude | starred + important |
-| `AutoSort/Jobs/Interview` | Claude | starred + important |
+| `AutoSort/Jobs/Offer` | Claude | starred + important + phone alert |
+| `AutoSort/Jobs/Interview` | Claude | starred + important + phone alert |
 | `AutoSort/Jobs/Rejected` | Claude | |
 | `AutoSort/Jobs/Applied` | Claude | |
 | `AutoSort/Jobs/Recruiter Outreach` | Claude | |
@@ -88,12 +88,35 @@ Claude decides from the `description`, so be specific about what belongs and wha
 Each item can have `star: true`, `important: true` and/or `archive: true`. After adding
 categories, run `setup` again so the new labels appear in Gmail right away.
 
-## Get a phone alert for important labels
+## Phone alerts for interview and offer emails
 
-Interview and Offer emails are starred and marked Important. In the Gmail app, open
-**Settings → your account → Notifications** and choose **High priority only** so your phone
-buzzes for those and stays quiet for alerts. On Android you can instead turn on
-notifications for just the `AutoSort/Jobs/Interview` label under **Manage labels**.
+Gmail's own notifications fire when an email arrives, before AutoSort has sorted it, so
+they can't tell an interview invite from a job alert. AutoSort sends its own alert
+through the free [ntfy](https://ntfy.sh) app instead, right after it labels an email
+`Jobs/Interview`, `Jobs/Offer` or `VIP`:
+
+> 🎉 **Interview: Acme Talent**
+> Next steps for Software Engineer at Acme
+
+Tapping it opens the email in Gmail.
+
+1. **Install ntfy** on your phone from the Play Store or App Store. No account needed.
+2. **Pick a secret topic name.** Anyone who knows the name can read your alerts, so make
+   it long and random, e.g. `autosort-yash-7f3k9q2m`. In the app, tap **+**, type the
+   name, and tap **Subscribe**.
+3. **Give AutoSort the name.** In the script editor: **Project Settings** (gear) →
+   **Script properties** → **Add script property**: `NTFY_TOPIC` = your topic name.
+   Save.
+4. **Test it.** Choose `testNotification` in the function dropdown and click **Run**.
+   Your phone should show "AutoSort test" within a few seconds.
+
+On Android, if alerts arrive late, open ntfy's settings and allow it to run in the
+background (turn off battery optimization for ntfy).
+
+Alerts arrive up to 10 minutes after the email, because that's how often AutoSort
+checks. Set `RUN_EVERY_MINUTES: 5` in `Config` and run `setup` again for faster alerts.
+Emails older than a day (e.g. from `sortRecentEmails`) are labeled and starred but don't
+send an alert. To get alerts for another category, add `notify: true` to it.
 
 ## Cost
 

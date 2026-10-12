@@ -6,12 +6,14 @@
  *   previewRecentEmails()   show how recent emails WOULD be sorted, change nothing
  *   sortRecentEmails()      sort the last CONFIG.BACKFILL_DAYS days of inbox mail
  *   stop()                  remove the timer
+ *   testNotification()      send a test alert to your phone (ntfy)
  *
  * sortInbox() is what the timer calls every few minutes.
  */
 
 const LAST_RUN_PROP = 'AUTOSORT_LAST_RUN';
 const API_KEY_PROP = 'ANTHROPIC_API_KEY';
+const NTFY_TOPIC_PROP = 'NTFY_TOPIC';
 const DAY_MS = 24 * 60 * 60 * 1000;
 // Apps Script kills a run after 6 minutes; stop early and continue next run.
 const TIME_BUDGET_MS = 4.5 * 60 * 1000;
@@ -35,6 +37,9 @@ function setup() {
       `No ${API_KEY_PROP} script property found. Only RULES will run until you add one ` +
         '(Project Settings -> Script properties).'
     );
+  }
+  if (!props.getProperty(NTFY_TOPIC_PROP)) {
+    console.log(`Phone alerts are off. Add a ${NTFY_TOPIC_PROP} script property to turn them on.`);
   }
 }
 
@@ -103,7 +108,10 @@ function sortSince_(since, { dryRun }) {
 
     const where = result.category ? labelName_(result.category) : '(left alone)';
     console.log(`${where} [${result.source}] ${message.getFrom()} | ${message.getSubject()}`);
-    if (result.category && !dryRun) applyCategory_(thread, message, result.category);
+    if (result.category && !dryRun) {
+      applyCategory_(thread, message, result.category);
+      if (result.category.notify) notify_(thread, message, result.category);
+    }
 
     sortedUpTo = message.getDate().getTime();
   }
@@ -253,6 +261,62 @@ function classifyWithClaude_(email, apiKey) {
 }
 
 // ----------------------------------------------------------------------------
+// Phone alerts (ntfy)
+// ----------------------------------------------------------------------------
+
+/** Sends a test alert so you can check the ntfy app is set up. */
+function testNotification() {
+  const topic = PropertiesService.getScriptProperties().getProperty(NTFY_TOPIC_PROP);
+  if (!topic) {
+    console.warn(`Add a ${NTFY_TOPIC_PROP} script property first (Project Settings -> Script properties).`);
+    return;
+  }
+  sendNtfy_(topic, {
+    title: 'AutoSort test',
+    message: 'Phone alerts are working. You will get one like this for interview and offer emails.',
+    tags: ['white_check_mark'],
+  });
+  console.log('Test alert sent. Check your phone.');
+}
+
+/**
+ * Pushes a phone alert for an email in a `notify: true` category.
+ * Failures are logged, never thrown, so a notification problem can't stop sorting.
+ */
+function notify_(thread, message, category) {
+  const topic = PropertiesService.getScriptProperties().getProperty(NTFY_TOPIC_PROP);
+  if (!topic) return;
+  // sortRecentEmails() goes back days; don't buzz the phone for old mail.
+  // Those emails are still labeled and starred.
+  if (Date.now() - message.getDate().getTime() > CONFIG.NOTIFY_MAX_AGE_HOURS * 60 * 60 * 1000) return;
+
+  try {
+    sendNtfy_(topic, {
+      title: `${category.label.split('/').pop()}: ${senderName_(message)}`,
+      message: message.getSubject() || '(no subject)',
+      tags: ['tada'],
+      priority: 4,
+      click: `https://mail.google.com/mail/u/0/#all/${thread.getId()}`,
+    });
+  } catch (err) {
+    console.warn(`Phone alert failed: ${err.message}`);
+  }
+}
+
+function sendNtfy_(topic, fields) {
+  // JSON publishing keeps emoji and non-English subjects intact.
+  const response = UrlFetchApp.fetch(CONFIG.NTFY_SERVER, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ topic, ...fields }),
+    muteHttpExceptions: true,
+  });
+  if (response.getResponseCode() !== 200) {
+    throw new Error(`ntfy returned ${response.getResponseCode()}: ${response.getContentText().slice(0, 200)}`);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Gmail helpers
 // ----------------------------------------------------------------------------
 
@@ -296,6 +360,13 @@ function senderAddress_(message) {
   const from = message.getFrom();
   const match = from.match(/<([^>]+)>/);
   return (match ? match[1] : from).trim().toLowerCase();
+}
+
+/** "Jane Doe <jane@acme.com>" -> "Jane Doe" (or the address if there's no name) */
+function senderName_(message) {
+  const from = message.getFrom();
+  const name = from.replace(/<[^>]*>/, '').replace(/"/g, '').trim();
+  return name || senderAddress_(message);
 }
 
 function removeTriggers_() {

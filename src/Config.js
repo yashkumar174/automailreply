@@ -12,6 +12,7 @@
  *   star: true       -> star the email
  *   important: true  -> mark the thread Important
  *   archive: true    -> move it out of the inbox (still findable under its label)
+ *   notify: true     -> send a phone alert (needs the ntfy app; see README)
  */
 const CONFIG = {
   LABEL_PREFIX: 'AutoSort',
@@ -35,6 +36,7 @@ const CONFIG = {
       from: [],
       star: true,
       important: true,
+      notify: true,
     },
     {
       // Automated job-board alerts: useful, but they bury the real replies.
@@ -63,6 +65,7 @@ const CONFIG = {
       description: 'A job offer, offer letter, or compensation/joining details for a role the user applied to.',
       star: true,
       important: true,
+      notify: true,
     },
     {
       label: 'Jobs/Interview',
@@ -73,6 +76,7 @@ const CONFIG = {
         'asking for availability or more information to continue the process.',
       star: true,
       important: true,
+      notify: true,
     },
     {
       label: 'Jobs/Rejected',
@@ -123,4 +127,12 @@ const CONFIG = {
   MAX_EMAILS_PER_RUN: 60,
   // How far back sortRecentEmails() / previewRecentEmails() look.
   BACKFILL_DAYS: 14,
+
+  // ---------------------------------------------------------------------------
+  // Phone alerts. Your ntfy topic is NOT stored here: put it in
+  // Project Settings -> Script properties as NTFY_TOPIC (see README).
+  // ---------------------------------------------------------------------------
+  NTFY_SERVER: 'https://ntfy.sh',
+  // No alerts for emails older than this (e.g. when sorting old mail).
+  NOTIFY_MAX_AGE_HOURS: 24,
 };
