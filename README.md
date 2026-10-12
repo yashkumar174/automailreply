@@ -127,6 +127,7 @@ see them), and in the Gmail app under **☰**. Interview and Offer emails are al
 | `setup` | Creates the labels and starts the timer. Run again after changing `Config`. |
 | `previewRecentEmails` | Shows how recent emails would be sorted. Changes nothing. |
 | `sortRecentEmails` | Sorts the last `BACKFILL_DAYS` days. |
+| `sortMatchingEmails` | Sorts older emails matching a Gmail search (`SEARCH_TO_SORT`), e.g. all dividend notices from the past year. |
 | `stop` | Stops the timer. Labels already applied stay. |
 | `testNotification` | Sends a test phone alert. |
 | `findTelegramChatId` | Telegram setup helper. |
@@ -249,6 +250,7 @@ To remove AutoSort completely: run `stop`, delete the project at
 | `Claude API returned 429` or `529` | Rate limit or overload. The run stops and retries in 10 minutes; nothing is skipped. |
 | `Address unavailable: https://ntfy.sh` | ntfy is refusing Google's servers. Use Telegram. |
 | An email got the wrong label | Check its reason in **Executions**, then add a line to `AI_GUIDE`. |
+| Older emails of one kind (e.g. dividends) weren't sorted | They're probably older than `BACKFILL_DAYS`. Set `SEARCH_TO_SORT` (e.g. `'dividend newer_than:1y'`) and run `sortMatchingEmails`. |
 | No "Advanced" link on the unverified-app screen | Work and school accounts may block personal scripts. Use a personal Gmail account. |
 
 ### Updating from an earlier version

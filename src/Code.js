@@ -5,6 +5,7 @@
  *   setup()                 create the labels and start the timer (run once)
  *   previewRecentEmails()   show how recent emails WOULD be sorted, change nothing
  *   sortRecentEmails()      sort the last CONFIG.BACKFILL_DAYS days of inbox mail
+ *   sortMatchingEmails()    sort older emails matching CONFIG.SEARCH_TO_SORT
  *   stop()                  remove the timer
  *   cleanUpOldLabels()      remove AutoSort labels that are no longer in Config
  *   testNotification()      send a test alert to your phone
@@ -77,6 +78,30 @@ function previewRecentEmails() {
   sortSince_(Date.now() - CONFIG.BACKFILL_DAYS * DAY_MS, { dryRun: true });
 }
 
+/**
+ * Sorts older emails that match the Gmail search in CONFIG.SEARCH_TO_SORT
+ * (e.g. past dividend notices), anywhere in your mailbox. Emails that already
+ * have an AutoSort label are skipped, so you can run it again until it says
+ * there's nothing left.
+ */
+function sortMatchingEmails() {
+  withLock_(() => {
+    const prefix = `${CONFIG.LABEL_PREFIX}/`;
+    const mine = myAddresses_();
+    const pending = [];
+    searchThreads_(CONFIG.SEARCH_TO_SORT).forEach((thread) => {
+      if (thread.getLabels().some((l) => l.getName().startsWith(prefix))) return;
+      const theirs = thread.getMessages().filter((m) => !m.isDraft() && !mine.includes(senderAddress_(m)));
+      if (theirs.length) pending.push({ thread, message: theirs[theirs.length - 1] });
+    });
+    pending.sort((a, b) => a.message.getDate() - b.message.getDate());
+
+    console.log(`"${CONFIG.SEARCH_TO_SORT}": ${pending.length} unsorted email(s) found.`);
+    const done = sortEmails_(pending, { dryRun: false });
+    if (done < pending.length) console.log('Run sortMatchingEmails again to sort the rest.');
+  });
+}
+
 // ----------------------------------------------------------------------------
 // Core loop
 // ----------------------------------------------------------------------------
@@ -87,17 +112,32 @@ function previewRecentEmails() {
  */
 function sortSince_(since, { dryRun }) {
   const startedAt = Date.now();
-  const pending = findNewEmails_(since);
-  if (pending.length === 0) return startedAt;
+  const { emails, until } = findNewEmails_(since, startedAt);
+  if (emails.length > 0) {
+    console.log(`${emails.length} new email(s) to sort${dryRun ? ' (preview only)' : ''}.`);
+  }
 
-  console.log(`${pending.length} new email(s) to sort${dryRun ? ' (preview only)' : ''}.`);
-  let sortedUpTo = since;
+  const done = sortEmails_(emails, { dryRun });
+  if (done < emails.length) {
+    return done === 0 ? since : emails[done - 1].message.getDate().getTime();
+  }
+  // Everything up to `until` is sorted. If the search had to be narrowed
+  // (lots of mail), the next run continues from there.
+  return until >= startedAt ? startedAt : until;
+}
 
+/**
+ * Classifies and labels each { thread, message }, oldest first. Stops early on
+ * the per-run limit, the time limit or a Claude API error, and returns how many
+ * it finished, so the rest can be retried.
+ */
+function sortEmails_(pending, { dryRun }) {
+  const startedAt = Date.now();
   for (let i = 0; i < pending.length; i++) {
     const outOfTime = Date.now() - startedAt > TIME_BUDGET_MS;
     if (i >= CONFIG.MAX_EMAILS_PER_RUN || outOfTime) {
       console.log(`Stopping after ${i} emails; the rest will be sorted next run.`);
-      return sortedUpTo;
+      return i;
     }
 
     const { thread, message } = pending[i];
@@ -108,7 +148,7 @@ function sortSince_(since, { dryRun }) {
       // Usually a Claude API outage or rate limit. Don't skip the email:
       // stop here and retry it on the next run.
       console.error(`Could not sort "${message.getSubject()}": ${err.message}`);
-      return sortedUpTo;
+      return i;
     }
 
     const where = result.category ? labelName_(result.category) : '(left alone)';
@@ -118,38 +158,58 @@ function sortSince_(since, { dryRun }) {
       applyCategory_(thread, message, result.category);
       if (result.category.notify) notify_(thread, message, result.category);
     }
-
-    sortedUpTo = message.getDate().getTime();
   }
-  return startedAt;
+  return pending.length;
 }
 
-/** Latest unsorted message per inbox thread that arrived after `since`, oldest first. */
-function findNewEmails_(since) {
-  // Gmail's after: is in seconds; go back a minute and filter precisely below.
-  const query = `in:inbox after:${Math.floor(since / 1000) - 60}`;
-  const myAddresses = [Session.getActiveUser().getEmail(), ...GmailApp.getAliases()].map((a) =>
-    a.toLowerCase()
-  );
+// Gmail search returns at most this many threads per query here.
+const MAX_SEARCH_THREADS = 500;
 
-  const found = [];
-  const pageSize = 100;
-  for (let start = 0; start < 500; start += pageSize) {
-    const threads = GmailApp.search(query, start, pageSize);
-    threads.forEach((thread) => {
-      const fresh = thread
-        .getMessages()
-        .filter(
-          (m) =>
-            m.getDate().getTime() > since &&
-            !m.isDraft() &&
-            !myAddresses.includes(senderAddress_(m))
-        );
-      if (fresh.length) found.push({ thread, message: fresh[fresh.length - 1] });
-    });
-    if (threads.length < pageSize) break;
+/**
+ * Latest unsorted message per inbox thread that arrived after `since`, oldest
+ * first. Gmail search returns newest threads first, so if more than
+ * MAX_SEARCH_THREADS match, the time window is halved until they fit; the
+ * oldest emails are never dropped. Returns the emails and the end of the
+ * window they cover.
+ */
+function findNewEmails_(since, now) {
+  const toSeconds = (ms) => Math.floor(ms / 1000);
+  let until = now;
+  let threads;
+  for (;;) {
+    // Gmail's after:/before: are in seconds; widen by a minute and filter precisely below.
+    const before = until < now ? ` before:${toSeconds(until) + 60}` : '';
+    threads = searchThreads_(`in:inbox after:${toSeconds(since) - 60}${before}`);
+    if (threads.length < MAX_SEARCH_THREADS || until - since < 60 * 60 * 1000) break;
+    until = since + Math.floor((until - since) / 2);
   }
-  return found.sort((a, b) => a.message.getDate() - b.message.getDate());
+
+  const mine = myAddresses_();
+  const emails = [];
+  threads.forEach((thread) => {
+    const fresh = thread.getMessages().filter((m) => {
+      const t = m.getDate().getTime();
+      return t > since && t <= until && !m.isDraft() && !mine.includes(senderAddress_(m));
+    });
+    if (fresh.length) emails.push({ thread, message: fresh[fresh.length - 1] });
+  });
+  emails.sort((a, b) => a.message.getDate() - b.message.getDate());
+  return { emails, until };
+}
+
+function searchThreads_(query) {
+  const threads = [];
+  const pageSize = 100;
+  for (let start = 0; start < MAX_SEARCH_THREADS; start += pageSize) {
+    const page = GmailApp.search(query, start, pageSize);
+    threads.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return threads;
+}
+
+function myAddresses_() {
+  return [Session.getActiveUser().getEmail(), ...GmailApp.getAliases()].map((a) => a.toLowerCase());
 }
 
 // ----------------------------------------------------------------------------

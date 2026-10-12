@@ -152,6 +152,10 @@ for the user. Judge the meaning, not keywords:
   MAX_EMAILS_PER_RUN: 60,
   // How far back sortRecentEmails() / previewRecentEmails() look.
   BACKFILL_DAYS: 14,
+  // sortMatchingEmails() sorts older emails matching this Gmail search, from
+  // anywhere in your mailbox, without re-sorting everything else. Use it to
+  // catch up on one kind of email, e.g. 'dividend newer_than:1y'.
+  SEARCH_TO_SORT: 'dividend newer_than:1y',
 
   // ---------------------------------------------------------------------------
   // Phone alerts. Your Telegram bot token / chat ID or ntfy topic are NOT

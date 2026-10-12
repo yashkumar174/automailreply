@@ -252,6 +252,70 @@ const tests = {
     assert.strictEqual(alertThread.moved, false);
   },
 
+  'a big backfill narrows the window instead of dropping the oldest emails'() {
+    const { context } = loadScript();
+    const DAY = 24 * 3600 * 1000;
+    const now = Date.now();
+    const since = now - 10 * DAY;
+    // 800 inbox threads spread evenly over the 10 days.
+    const threads = Array.from({ length: 800 }, (_, i) => {
+      const msg = { ...fakeMessage({ id: `m${i}`, from: 'x@y.com', date: new Date(since + 1000 + (i * 10 * DAY) / 800) }), isDraft: () => false };
+      return { getMessages: () => [msg], date: msg.getDate().getTime() };
+    });
+    const queries = [];
+    context.Session = { getActiveUser: () => ({ getEmail: () => 'me@gmail.com' }) };
+    context.GmailApp = {
+      getAliases: () => [],
+      search(query, start, max) {
+        queries.push(query);
+        const after = Number(/after:(\d+)/.exec(query)[1]) * 1000;
+        const beforeMatch = /before:(\d+)/.exec(query);
+        const before = beforeMatch ? Number(beforeMatch[1]) * 1000 : Infinity;
+        return threads
+          .filter((t) => t.date > after && t.date < before)
+          .sort((a, b) => b.date - a.date)
+          .slice(start, start + max);
+      },
+    };
+
+    const { emails, until } = vm.runInContext('findNewEmails_', context)(since, now);
+    assert.ok(until < now, 'window should have been narrowed');
+    assert.ok(emails.length > 0 && emails.length < 500);
+    // The very oldest email is included, and the list is oldest first.
+    assert.strictEqual(emails[0].message.getId(), 'm0');
+    assert.ok(emails.every((e, i) => i === 0 || emails[i - 1].message.getDate() <= e.message.getDate()));
+    assert.ok(queries.some((q) => q.includes('before:')));
+  },
+
+  'sortMatchingEmails skips threads that already have an AutoSort label'() {
+    const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('Dividends') });
+    const makeThread = (id, labels) => {
+      const msg = { ...fakeMessage({ id, from: 'Registrar <div@in.mpms.mufg.com>', subject: `Dividend ${id}` }), isDraft: () => false };
+      const t = { labels: labels.slice(), getMessages: () => [msg] };
+      t.getLabels = () => t.labels.map((n) => ({ getName: () => n }));
+      t.addLabel = (l) => t.labels.push(l.getName());
+      t.removeLabel = () => {};
+      return t;
+    };
+    const done = makeThread('a', ['AutoSort/Dividends']);
+    const todo = makeThread('b', ['Personal']);
+    let searched;
+    context.Session = { getActiveUser: () => ({ getEmail: () => 'me@gmail.com' }) };
+    context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+    context.GmailApp = {
+      getAliases: () => [],
+      search: (q) => ((searched = q), [done, todo]),
+      getUserLabelByName: (n) => ({ getName: () => n }),
+      createLabel: (n) => ({ getName: () => n }),
+    };
+
+    vm.runInContext('sortMatchingEmails', context)();
+    assert.strictEqual(searched, 'dividend newer_than:1y');
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.match(fetchCalls[0].payload.messages[0].content, /Dividend b/);
+    assert.ok(todo.labels.includes('AutoSort/Dividends'));
+  },
+
   'sender address is extracted from display-name format'() {
     const { context } = loadScript();
     const senderAddress = vm.runInContext('senderAddress_', context);
