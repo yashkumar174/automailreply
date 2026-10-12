@@ -92,26 +92,41 @@ categories, run `setup` again so the new labels appear in Gmail right away.
 
 Gmail's own notifications fire when an email arrives, before AutoSort has sorted it, so
 they can't tell an interview invite from a job alert. AutoSort sends its own alert
-through the free [ntfy](https://ntfy.sh) app instead, right after it labels an email
-`Jobs/Interview`, `Jobs/Offer` or `VIP`:
+instead, right after it labels an email `Jobs/Interview`, `Jobs/Offer` or `VIP`:
 
 > 🎉 **Interview: Acme Talent**
 > Next steps for Software Engineer at Acme
+> [Open in Gmail]
 
-Tapping it opens the email in Gmail.
+Set up **Telegram** (recommended) or **ntfy**. If you set up both, you get both.
+
+### Telegram (recommended)
+
+1. **Create a bot.** In Telegram, search for **@BotFather** (blue checkmark), tap
+   **Start**, send `/newbot`, and pick any name and username (the username must end in
+   `bot`, e.g. `yash_autosort_bot`). BotFather replies with a **token** like
+   `7123456789:AAH...`. Keep it secret.
+2. **Save the token.** In the script editor: **Project Settings** (gear) →
+   **Script properties** → **Add script property**: `TELEGRAM_BOT_TOKEN` = the token. Save.
+3. **Say hi to your bot.** Tap the `t.me/...` link in BotFather's reply, tap **Start**,
+   and send it any message, e.g. `hi`.
+4. **Get your chat ID.** Back in the editor, run `findTelegramChatId`. The log shows
+   `Your chat ID is 123456789`. Add a script property `TELEGRAM_CHAT_ID` = that number.
+5. **Test it.** Run `testNotification`. Your bot should message you within seconds.
+
+### ntfy
+
+Some ntfy.sh servers refuse connections from Google; if `testNotification` fails with
+"Address unavailable", use Telegram instead and delete the `NTFY_TOPIC` property.
 
 1. **Install ntfy** on your phone from the Play Store or App Store. No account needed.
 2. **Pick a secret topic name.** Anyone who knows the name can read your alerts, so make
    it long and random, e.g. `autosort-yash-7f3k9q2m`. In the app, tap **+**, type the
    name, and tap **Subscribe**.
-3. **Give AutoSort the name.** In the script editor: **Project Settings** (gear) →
-   **Script properties** → **Add script property**: `NTFY_TOPIC` = your topic name.
-   Save.
-4. **Test it.** Choose `testNotification` in the function dropdown and click **Run**.
-   Your phone should show "AutoSort test" within a few seconds.
+3. **Give AutoSort the name.** Add a script property `NTFY_TOPIC` = your topic name.
+4. **Test it.** Run `testNotification`.
 
-On Android, if alerts arrive late, open ntfy's settings and allow it to run in the
-background (turn off battery optimization for ntfy).
+### Good to know
 
 Alerts arrive up to 10 minutes after the email, because that's how often AutoSort
 checks. Set `RUN_EVERY_MINUTES: 5` in `Config` and run `setup` again for faster alerts.

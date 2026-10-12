@@ -143,6 +143,32 @@ const tests = {
     assert.strictEqual(p.click, 'https://mail.google.com/mail/u/0/#all/thread123');
   },
 
+  'interview email sends a Telegram message with a Gmail button'() {
+    const { context, fetchCalls } = loadScript({
+      fetchResponse: { status: 200, body: { ok: true } },
+      props: { TELEGRAM_BOT_TOKEN: '123:abc', TELEGRAM_CHAT_ID: '987' },
+    });
+    const msg = fakeMessage({ from: 'Acme Talent <no-reply@greenhouse.io>', subject: 'Next steps' });
+    vm.runInContext('notify_', context)(fakeThread, msg, interview);
+    assert.strictEqual(fetchCalls.length, 1);
+    assert.strictEqual(fetchCalls[0].url, 'https://api.telegram.org/bot123:abc/sendMessage');
+    const p = fetchCalls[0].payload;
+    assert.strictEqual(p.chat_id, '987');
+    assert.strictEqual(p.text, '🎉 Interview: Acme Talent\nNext steps');
+    assert.strictEqual(p.reply_markup.inline_keyboard[0][0].url, 'https://mail.google.com/mail/u/0/#all/thread123');
+  },
+
+  'one failing channel does not block the other'() {
+    const { context, fetchCalls, warnings } = loadScript({
+      fetchResponse: { status: 500, body: {} },
+      props: { TELEGRAM_BOT_TOKEN: 't', TELEGRAM_CHAT_ID: 'c', NTFY_TOPIC: 'n' },
+    });
+    const sent = vm.runInContext('sendAlert_', context)({ title: 'x', message: 'y' });
+    assert.strictEqual(sent, 0);
+    assert.strictEqual(fetchCalls.length, 2);
+    assert.strictEqual(warnings.length, 2);
+  },
+
   'no alert without a topic or for old emails'() {
     let { context, fetchCalls } = loadScript({ fetchResponse: { status: 200, body: {} }, props: {} });
     vm.runInContext('notify_', context)(fakeThread, fakeMessage({ from: 'a@b.com' }), interview);
@@ -157,7 +183,7 @@ const tests = {
   'a failed alert is logged, not thrown'() {
     const { context, warnings } = loadScript({ fetchResponse: { status: 500, body: {} }, props: { NTFY_TOPIC: 't' } });
     vm.runInContext('notify_', context)(fakeThread, fakeMessage({ from: 'a@b.com' }), interview);
-    assert.match(warnings[0], /Phone alert failed: ntfy returned 500/);
+    assert.match(warnings[0], /ntfy alert failed: ntfy returned 500/);
   },
 
   'sender address is extracted from display-name format'() {

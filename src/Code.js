@@ -6,7 +6,8 @@
  *   previewRecentEmails()   show how recent emails WOULD be sorted, change nothing
  *   sortRecentEmails()      sort the last CONFIG.BACKFILL_DAYS days of inbox mail
  *   stop()                  remove the timer
- *   testNotification()      send a test alert to your phone (ntfy)
+ *   testNotification()      send a test alert to your phone
+ *   findTelegramChatId()    Telegram setup: show your chat ID
  *
  * sortInbox() is what the timer calls every few minutes.
  */
@@ -14,6 +15,8 @@
 const LAST_RUN_PROP = 'AUTOSORT_LAST_RUN';
 const API_KEY_PROP = 'ANTHROPIC_API_KEY';
 const NTFY_TOPIC_PROP = 'NTFY_TOPIC';
+const TELEGRAM_TOKEN_PROP = 'TELEGRAM_BOT_TOKEN';
+const TELEGRAM_CHAT_PROP = 'TELEGRAM_CHAT_ID';
 const DAY_MS = 24 * 60 * 60 * 1000;
 // Apps Script kills a run after 6 minutes; stop early and continue next run.
 const TIME_BUDGET_MS = 4.5 * 60 * 1000;
@@ -38,9 +41,10 @@ function setup() {
         '(Project Settings -> Script properties).'
     );
   }
-  if (!props.getProperty(NTFY_TOPIC_PROP)) {
-    console.log(`Phone alerts are off. Add a ${NTFY_TOPIC_PROP} script property to turn them on.`);
-  }
+  const alertsOn =
+    (props.getProperty(TELEGRAM_TOKEN_PROP) && props.getProperty(TELEGRAM_CHAT_PROP)) ||
+    props.getProperty(NTFY_TOPIC_PROP);
+  if (!alertsOn) console.log('Phone alerts are off. See README, "Phone alerts", to turn them on.');
 }
 
 function stop() {
@@ -261,54 +265,119 @@ function classifyWithClaude_(email, apiKey) {
 }
 
 // ----------------------------------------------------------------------------
-// Phone alerts (ntfy)
+// Phone alerts (Telegram and/or ntfy)
 // ----------------------------------------------------------------------------
 
-/** Sends a test alert so you can check the ntfy app is set up. */
+/** Sends a test alert to every alert channel you've set up. */
 function testNotification() {
-  const topic = PropertiesService.getScriptProperties().getProperty(NTFY_TOPIC_PROP);
-  if (!topic) {
-    console.warn(`Add a ${NTFY_TOPIC_PROP} script property first (Project Settings -> Script properties).`);
-    return;
-  }
-  sendNtfy_(topic, {
+  const sent = sendAlert_({
     title: 'AutoSort test',
     message: 'Phone alerts are working. You will get one like this for interview and offer emails.',
-    tags: ['white_check_mark'],
   });
-  console.log('Test alert sent. Check your phone.');
+  if (sent === null) {
+    console.warn(
+      'No alert channel set up. Add TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (or NTFY_TOPIC) ' +
+        'in Project Settings -> Script properties. See README, "Phone alerts".'
+    );
+  } else if (sent > 0) {
+    console.log('Test alert sent. Check your phone.');
+  }
 }
 
 /**
- * Pushes a phone alert for an email in a `notify: true` category.
- * Failures are logged, never thrown, so a notification problem can't stop sorting.
+ * Telegram setup helper: after you send your bot any message, this logs your
+ * chat ID so you can save it as TELEGRAM_CHAT_ID.
  */
+function findTelegramChatId() {
+  const token = PropertiesService.getScriptProperties().getProperty(TELEGRAM_TOKEN_PROP);
+  if (!token) {
+    console.warn(`Add the ${TELEGRAM_TOKEN_PROP} script property first.`);
+    return;
+  }
+  const result = JSON.parse(
+    UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/getUpdates`, { muteHttpExceptions: true }).getContentText()
+  );
+  if (!result.ok) {
+    console.warn(`Telegram says: ${result.description}. Check the bot token.`);
+    return;
+  }
+  const chats = result.result.map((u) => (u.message || u.edited_message || {}).chat).filter(Boolean);
+  if (chats.length === 0) {
+    console.warn('No messages found. Open your bot in Telegram, send it "hi", then run this again.');
+    return;
+  }
+  const chat = chats[chats.length - 1];
+  console.log(`Your chat ID is ${chat.id}. Save it as the ${TELEGRAM_CHAT_PROP} script property.`);
+}
+
+/** Pushes a phone alert for an email in a `notify: true` category. */
 function notify_(thread, message, category) {
-  const topic = PropertiesService.getScriptProperties().getProperty(NTFY_TOPIC_PROP);
-  if (!topic) return;
   // sortRecentEmails() goes back days; don't buzz the phone for old mail.
   // Those emails are still labeled and starred.
   if (Date.now() - message.getDate().getTime() > CONFIG.NOTIFY_MAX_AGE_HOURS * 60 * 60 * 1000) return;
 
-  try {
-    sendNtfy_(topic, {
-      title: `${category.label.split('/').pop()}: ${senderName_(message)}`,
-      message: message.getSubject() || '(no subject)',
-      tags: ['tada'],
-      priority: 4,
-      click: `https://mail.google.com/mail/u/0/#all/${thread.getId()}`,
-    });
-  } catch (err) {
-    console.warn(`Phone alert failed: ${err.message}`);
+  sendAlert_({
+    title: `${category.label.split('/').pop()}: ${senderName_(message)}`,
+    message: message.getSubject() || '(no subject)',
+    link: `https://mail.google.com/mail/u/0/#all/${thread.getId()}`,
+  });
+}
+
+/**
+ * Sends to every configured channel. Returns how many succeeded, or null if
+ * none is configured. Failures are logged, never thrown, so a notification
+ * problem can't stop sorting.
+ */
+function sendAlert_(alert) {
+  const props = PropertiesService.getScriptProperties();
+  const channels = [];
+  const token = props.getProperty(TELEGRAM_TOKEN_PROP);
+  const chatId = props.getProperty(TELEGRAM_CHAT_PROP);
+  if (token && chatId) channels.push(['Telegram', () => sendTelegram_(token, chatId, alert)]);
+  const topic = props.getProperty(NTFY_TOPIC_PROP);
+  if (topic) channels.push(['ntfy', () => sendNtfy_(topic, alert)]);
+  if (channels.length === 0) return null;
+
+  let sent = 0;
+  channels.forEach(([name, send]) => {
+    try {
+      send();
+      sent++;
+    } catch (err) {
+      console.warn(`${name} alert failed: ${err.message}`);
+    }
+  });
+  return sent;
+}
+
+function sendTelegram_(token, chatId, { title, message, link }) {
+  const payload = {
+    chat_id: chatId,
+    text: `🎉 ${title}\n${message}`,
+    link_preview_options: { is_disabled: true },
+  };
+  if (link) payload.reply_markup = { inline_keyboard: [[{ text: 'Open in Gmail', url: link }]] };
+
+  const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+  if (response.getResponseCode() !== 200) {
+    throw new Error(`Telegram returned ${response.getResponseCode()}: ${response.getContentText().slice(0, 200)}`);
   }
 }
 
-function sendNtfy_(topic, fields) {
+function sendNtfy_(topic, { title, message, link }) {
   // JSON publishing keeps emoji and non-English subjects intact.
+  const payload = { topic, title, message, tags: ['tada'], priority: 4 };
+  if (link) payload.click = link;
+
   const response = UrlFetchApp.fetch(CONFIG.NTFY_SERVER, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ topic, ...fields }),
+    payload: JSON.stringify(payload),
     muteHttpExceptions: true,
   });
   if (response.getResponseCode() !== 200) {

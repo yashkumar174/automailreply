@@ -12,7 +12,7 @@
  *   star: true       -> star the email
  *   important: true  -> mark the thread Important
  *   archive: true    -> move it out of the inbox (still findable under its label)
- *   notify: true     -> send a phone alert (needs the ntfy app; see README)
+ *   notify: true     -> send a phone alert (Telegram or ntfy; see README)
  */
 const CONFIG = {
   LABEL_PREFIX: 'AutoSort',
@@ -129,8 +129,8 @@ const CONFIG = {
   BACKFILL_DAYS: 14,
 
   // ---------------------------------------------------------------------------
-  // Phone alerts. Your ntfy topic is NOT stored here: put it in
-  // Project Settings -> Script properties as NTFY_TOPIC (see README).
+  // Phone alerts. Your Telegram bot token / chat ID or ntfy topic are NOT
+  // stored here: they go in Project Settings -> Script properties (see README).
   // ---------------------------------------------------------------------------
   NTFY_SERVER: 'https://ntfy.sh',
   // No alerts for emails older than this (e.g. when sorting old mail).
