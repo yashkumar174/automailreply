@@ -139,7 +139,7 @@ const tests = {
     assert.strictEqual(options.headers['anthropic-beta'], undefined);
     assert.strictEqual(payload.output_config.effort, 'medium');
     assert.deepStrictEqual(payload.output_config.format.schema.properties.category.enum, [
-      'Jobs/Applied', 'Jobs/Interview', 'Jobs/Offer Letter', 'Jobs/Rejected', 'Jobs/Job Alerts', 'None',
+      'Jobs/Applied', 'Jobs/Interview', 'Jobs/Offer Letter', 'Jobs/Rejected', 'Jobs/Job Alerts', 'Dividends', 'None',
     ]);
   },
 

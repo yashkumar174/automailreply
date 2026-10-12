@@ -1,11 +1,11 @@
 /**
  * AutoSort configuration. This is the only file you need to edit.
  *
- * Claude reads every new email and files job emails under five labels:
+ * Claude reads every new email and files it under one of these labels:
  *
  *   AutoSort/Jobs/Applied        AutoSort/Jobs/Interview
  *   AutoSort/Jobs/Offer Letter   AutoSort/Jobs/Rejected
- *   AutoSort/Jobs/Job Alerts
+ *   AutoSort/Jobs/Job Alerts     AutoSort/Dividends
  *
  * Everything else (newsletters, social media, personal mail...) is left alone.
  *
@@ -19,7 +19,7 @@ const CONFIG = {
   LABEL_PREFIX: 'AutoSort',
 
   // ---------------------------------------------------------------------------
-  // The job labels. Claude picks one of these, or none.
+  // The labels Claude picks from (or none).
   // ---------------------------------------------------------------------------
   AI_CATEGORIES: [
     {
@@ -63,6 +63,15 @@ const CONFIG = {
         'job alerts, "jobs you may like", "N new jobs matching your profile", hiring drives or ' +
         'recruiter mass mailers sent to many people.',
     },
+    {
+      label: 'Dividends',
+      description:
+        'Dividend on shares the user holds (bought through Zerodha or any other broker): ' +
+        'intimation of dividend payment, dividend credit advice, TDS deducted on dividend. ' +
+        'These come from the company itself or its registrar (MUFG Intime / Link Intime, ' +
+        'KFin Technologies, Bigshare, etc.), not usually from the broker. ' +
+        'Not AGM notices, e-voting, contract notes or broker marketing.',
+    },
   ],
 
   // How Claude should think about borderline emails. Edit to taste.
@@ -87,6 +96,8 @@ for the user. Judge the meaning, not keywords:
   works") belongs to whatever stage the thread is at, so use the earlier messages.
 - An attachment named like "Offer_Letter.pdf" or "Appointment Letter" is strong evidence of an
   offer.
+- Emails about the user's investments (dividends) are judged on their own: the job rules
+  above don't apply to them.
 - When genuinely unsure whether an email is positive progress on the user's application,
   choose Jobs/Interview: a false alarm costs the user a glance, a miss can cost them the job.
 `,

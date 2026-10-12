@@ -1,17 +1,18 @@
 # AutoSort for Gmail
 
 Never miss the email that matters. AutoSort runs inside your Google account every
-10 minutes. Claude reads each new email and files your job emails under five labels,
-so an interview invite can't hide under 40 job alerts:
+10 minutes. Claude reads each new email and files your job emails (and dividend
+notices) under labels, so an interview invite can't hide under 40 job alerts:
 
 ```
 AutoSort
- └─ Jobs
-     ├─ Applied        application received / under review
-     ├─ Interview      interview, test, shortlisted, next round   ⭐ + phone alert
-     ├─ Offer Letter   an actual offer, joining, onboarding        ⭐ + phone alert
-     ├─ Rejected       not moving forward
-     └─ Job Alerts     job listings and recommendations
+ ├─ Jobs
+ │   ├─ Applied        application received / under review
+ │   ├─ Interview      interview, test, shortlisted, next round   ⭐ + phone alert
+ │   ├─ Offer Letter   an actual offer, joining, onboarding        ⭐ + phone alert
+ │   ├─ Rejected       not moving forward
+ │   └─ Job Alerts     job listings and recommendations
+ └─ Dividends          dividend payment / credit notices for your shares
 ```
 
 Job alerts from known alert-only senders (LinkedIn, Indeed and Naukri alert addresses)
