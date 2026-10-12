@@ -15,7 +15,7 @@ Default labels:
 | Label | Comes from | Extra |
 |---|---|---|
 | `AutoSort/VIP` | your sender list (empty until you add some) | starred + important |
-| `AutoSort/Job Alerts` | LinkedIn / Indeed / Naukri job alerts | archived out of the inbox |
+| `AutoSort/Job Alerts` | known LinkedIn / Indeed / Naukri alert senders, plus other portal alerts Claude spots | known senders are archived; ones Claude spots stay in the inbox |
 | `AutoSort/Jobs/Offer` | Claude | starred + important |
 | `AutoSort/Jobs/Interview` | Claude | starred + important |
 | `AutoSort/Jobs/Rejected` | Claude | |

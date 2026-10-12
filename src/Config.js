@@ -45,7 +45,9 @@ const CONFIG = {
         'jobalerts-noreply@linkedin.com',
         'jobs-listings@linkedin.com',
         'alert@indeed.com',
+        '@jobalert.indeed.com',
         'jobalert@naukri.com',
+        'recommendationnc@naukri.com',
       ],
       archive: true,
     },
@@ -85,7 +87,18 @@ const CONFIG = {
     },
     {
       label: 'Jobs/Recruiter Outreach',
-      description: 'A recruiter or company reaching out about a role the user has not applied to yet.',
+      description:
+        'A specific recruiter or hiring manager personally contacting the user about a role they have ' +
+        'not applied to yet. Not automated job recommendations or "jobs you may like" lists.',
+    },
+    {
+      // Catches alerts from portals and addresses the Job Alerts rule doesn't
+      // list. Labeled but kept in the inbox, so a misread email is never hidden.
+      label: 'Job Alerts',
+      description:
+        'Automated job listings or recommendations from a job portal (Naukri, Indeed, LinkedIn, ' +
+        'Internshala, Glassdoor, etc.): "jobs matching your profile", "new jobs for you", ' +
+        '"immediate requirement" mailers, job alert digests.',
     },
   ],
 

@@ -67,6 +67,15 @@ const tests = {
     assert.strictEqual(fetchCalls.length, 1);
   },
 
+  'portal alert subdomains are caught by the free Job Alerts rule'() {
+    const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('None') });
+    const msg = fakeMessage({ from: 'Indeed <donotreply@jobalert.indeed.com>', subject: '20 more jobs' });
+    const result = vm.runInContext('classify_', context)(msg);
+    assert.strictEqual(result.category.label, 'Job Alerts');
+    assert.strictEqual(result.category.archive, true);
+    assert.strictEqual(fetchCalls.length, 0);
+  },
+
   'rule with from + keywords needs both to match'() {
     const { context } = loadScript();
     const ruleMatches = vm.runInContext('ruleMatches_', context);
@@ -95,7 +104,7 @@ const tests = {
     assert.strictEqual(payload.fallbacks, undefined);
     assert.strictEqual(options.headers['anthropic-beta'], undefined);
     assert.deepStrictEqual(payload.output_config.format.schema.properties.category.enum, [
-      'Jobs/Offer', 'Jobs/Interview', 'Jobs/Rejected', 'Jobs/Applied', 'Jobs/Recruiter Outreach', 'None',
+      'Jobs/Offer', 'Jobs/Interview', 'Jobs/Rejected', 'Jobs/Applied', 'Jobs/Recruiter Outreach', 'Job Alerts', 'None',
     ]);
   },
 
