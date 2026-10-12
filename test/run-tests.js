@@ -81,8 +81,10 @@ const tests = {
     const { url, options, payload } = fetchCalls[0];
     assert.strictEqual(url, 'https://api.anthropic.com/v1/messages');
     assert.strictEqual(options.headers['x-api-key'], 'test-key');
-    assert.strictEqual(payload.model, 'claude-opus-5-5');
-    assert.strictEqual(payload.fallbacks, 'default');
+    assert.strictEqual(payload.model, 'claude-haiku-5-5');
+    // Haiku doesn't support server-side fallbacks, so neither is sent.
+    assert.strictEqual(payload.fallbacks, undefined);
+    assert.strictEqual(options.headers['anthropic-beta'], undefined);
     assert.deepStrictEqual(payload.output_config.format.schema.properties.category.enum, [
       'Jobs/Offer', 'Jobs/Interview', 'Jobs/Rejected', 'Jobs/Applied', 'Jobs/Recruiter Outreach', 'None',
     ]);

@@ -89,9 +89,9 @@ const CONFIG = {
   // Project Settings -> Script properties as ANTHROPIC_API_KEY.
   // ---------------------------------------------------------------------------
   AI_ENABLED: true,
-  // Most accurate default. 'claude-haiku-5-5' costs ~40x less and is usually
-  // good enough for sorting email (see README, "Cost").
-  CLAUDE_MODEL: 'claude-opus-5-5',
+  // Cheap and good enough for sorting email. For the most accurate (and ~40x
+  // pricier) option, use 'claude-opus-5-5' (see README, "Cost").
+  CLAUDE_MODEL: 'claude-haiku-5-5',
   // Only the first part of long emails is sent to Claude. The decision almost
   // always sits at the top, and this keeps newsletters from costing extra.
   MAX_BODY_CHARS: 6000,

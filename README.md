@@ -100,11 +100,12 @@ Rules are free. Only emails no rule matched are sent to Claude, and only their f
 
 | Model (`CLAUDE_MODEL`) | Per email (approx.) | 20 emails/day to Claude |
 |---|---|---|
-| `claude-opus-5-5` (default, most accurate) | ~$0.01 | ~$6–9 / month |
-| `claude-haiku-5-5` | ~$0.0003 | ~$0.20 / month |
+| `claude-haiku-5-5` (default) | ~$0.0003 | ~$0.20 / month |
+| `claude-opus-5-5` (most accurate) | ~$0.01 | ~$6–9 / month |
 
-Haiku is usually accurate enough for sorting email. To use it, change one line in `Config`:
-`CLAUDE_MODEL: 'claude-haiku-5-5'`. Adding rules for senders that write often (job
+Haiku is usually accurate enough for sorting email. If it mislabels things, switch to Opus
+by changing one line in `Config`: `CLAUDE_MODEL: 'claude-opus-5-5'`. Adding rules for
+senders that write often (job
 boards, newsletters) cuts cost with either model.
 
 Set `AI_ENABLED: false` to run rules only, for free.
