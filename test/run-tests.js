@@ -316,6 +316,25 @@ const tests = {
     assert.ok(todo.labels.includes('AutoSort/Dividends'));
   },
 
+  'recheckMatchingEmails removes the label from emails that no longer fit'() {
+    const { context } = loadScript({ fetchResponse: claudeSays('None') });
+    const msg = { ...fakeMessage({ id: 't', from: 'Balrampur <cs.bcml@kfintech.com>', subject: 'Information Required on TDS (Form 15G/H)' }), isDraft: () => false };
+    const labels = ['AutoSort/Dividends', 'Personal'];
+    const thread = {
+      getMessages: () => [msg],
+      getLabels: () => labels.map((n) => ({ getName: () => n })),
+      removeLabel: (l) => labels.splice(labels.indexOf(l.getName()), 1),
+    };
+    let searched;
+    context.Session = { getActiveUser: () => ({ getEmail: () => 'me@gmail.com' }) };
+    context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+    context.GmailApp = { getAliases: () => [], search: (q) => ((searched = q), [thread]) };
+
+    vm.runInContext('recheckMatchingEmails', context)();
+    assert.strictEqual(searched, 'label:autosort-dividends');
+    assert.deepStrictEqual(labels, ['Personal']);
+  },
+
   'sender address is extracted from display-name format'() {
     const { context } = loadScript();
     const senderAddress = vm.runInContext('senderAddress_', context);

@@ -6,6 +6,7 @@
  *   previewRecentEmails()   show how recent emails WOULD be sorted, change nothing
  *   sortRecentEmails()      sort the last CONFIG.BACKFILL_DAYS days of inbox mail
  *   sortMatchingEmails()    sort older emails matching CONFIG.SEARCH_TO_SORT
+ *   recheckMatchingEmails() re-check labeled emails matching CONFIG.SEARCH_TO_RECHECK
  *   stop()                  remove the timer
  *   cleanUpOldLabels()      remove AutoSort labels that are no longer in Config
  *   testNotification()      send a test alert to your phone
@@ -85,21 +86,34 @@ function previewRecentEmails() {
  * there's nothing left.
  */
 function sortMatchingEmails() {
-  withLock_(() => {
-    const prefix = `${CONFIG.LABEL_PREFIX}/`;
-    const mine = myAddresses_();
-    const pending = [];
-    searchThreads_(CONFIG.SEARCH_TO_SORT).forEach((thread) => {
-      if (thread.getLabels().some((l) => l.getName().startsWith(prefix))) return;
-      const theirs = thread.getMessages().filter((m) => !m.isDraft() && !mine.includes(senderAddress_(m)));
-      if (theirs.length) pending.push({ thread, message: theirs[theirs.length - 1] });
-    });
-    pending.sort((a, b) => a.message.getDate() - b.message.getDate());
+  withLock_(() => sortSearch_(CONFIG.SEARCH_TO_SORT, { recheck: false }));
+}
 
-    console.log(`"${CONFIG.SEARCH_TO_SORT}": ${pending.length} unsorted email(s) found.`);
-    const done = sortEmails_(pending, { dryRun: false });
-    if (done < pending.length) console.log('Run sortMatchingEmails again to sort the rest.');
+/**
+ * Re-checks emails matching CONFIG.SEARCH_TO_RECHECK (by default everything
+ * labeled AutoSort/Dividends) against the current Config, even though they're
+ * already labeled. Emails that no longer fit any label lose their AutoSort label.
+ */
+function recheckMatchingEmails() {
+  withLock_(() => sortSearch_(CONFIG.SEARCH_TO_RECHECK, { recheck: true }));
+}
+
+function sortSearch_(query, { recheck }) {
+  const prefix = `${CONFIG.LABEL_PREFIX}/`;
+  const mine = myAddresses_();
+  const pending = [];
+  searchThreads_(query).forEach((thread) => {
+    if (!recheck && thread.getLabels().some((l) => l.getName().startsWith(prefix))) return;
+    const theirs = thread.getMessages().filter((m) => !m.isDraft() && !mine.includes(senderAddress_(m)));
+    if (theirs.length) pending.push({ thread, message: theirs[theirs.length - 1] });
   });
+  pending.sort((a, b) => a.message.getDate() - b.message.getDate());
+
+  console.log(`"${query}": ${pending.length} email(s) to ${recheck ? 're-check' : 'sort'}.`);
+  const done = sortEmails_(pending, { dryRun: false, recheck });
+  if (done < pending.length) {
+    console.log(`Run ${recheck ? 'recheckMatchingEmails' : 'sortMatchingEmails'} again to finish the rest.`);
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -131,7 +145,7 @@ function sortSince_(since, { dryRun }) {
  * the per-run limit, the time limit or a Claude API error, and returns how many
  * it finished, so the rest can be retried.
  */
-function sortEmails_(pending, { dryRun }) {
+function sortEmails_(pending, { dryRun, recheck = false }) {
   const startedAt = Date.now();
   for (let i = 0; i < pending.length; i++) {
     const outOfTime = Date.now() - startedAt > TIME_BUDGET_MS;
@@ -157,6 +171,8 @@ function sortEmails_(pending, { dryRun }) {
     if (result.category && !dryRun) {
       applyCategory_(thread, message, result.category);
       if (result.category.notify) notify_(thread, message, result.category);
+    } else if (!result.category && recheck && !dryRun) {
+      removeAutoSortLabels_(thread);
     }
   }
   return pending.length;
@@ -565,15 +581,20 @@ function applyCategory_(thread, message, category) {
 
   // A thread can move between categories (e.g. Applied -> Interview), so drop
   // any older AutoSort category label first.
-  thread
-    .getLabels()
-    .filter((l) => l.getName().startsWith(`${CONFIG.LABEL_PREFIX}/`) && l.getName() !== target)
-    .forEach((l) => thread.removeLabel(l));
+  removeAutoSortLabels_(thread, target);
 
   thread.addLabel(getOrCreateLabel_(target));
   if (category.star) message.star();
   if (category.important) thread.markImportant();
   if (category.archive) thread.moveToArchive();
+}
+
+/** Removes AutoSort labels from a thread, except `keep` if given. */
+function removeAutoSortLabels_(thread, keep) {
+  thread
+    .getLabels()
+    .filter((l) => l.getName().startsWith(`${CONFIG.LABEL_PREFIX}/`) && l.getName() !== keep)
+    .forEach((l) => thread.removeLabel(l));
 }
 
 /** Creates the label and each parent ("A", "A/B", "A/B/C") so Gmail nests them. */

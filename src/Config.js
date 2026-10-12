@@ -66,11 +66,11 @@ const CONFIG = {
     {
       label: 'Dividends',
       description:
-        'Dividend on shares the user holds (bought through Zerodha or any other broker): ' +
-        'intimation of dividend payment, dividend credit advice, TDS deducted on dividend. ' +
-        'These come from the company itself or its registrar (MUFG Intime / Link Intime, ' +
-        'KFin Technologies, Bigshare, etc.), not usually from the broker. ' +
-        'Not AGM notices, e-voting, contract notes or broker marketing.',
+        'Confirmation that a dividend HAS BEEN PAID or credited to the user\'s bank account: ' +
+        '"intimation of payment of dividend", dividend credit advice, or a payment statement ' +
+        'showing the amount paid, net amount, date of credit/payment or bank account. ' +
+        'These come from the company or its registrar (MUFG Intime / Link Intime, KFin ' +
+        'Technologies, Beetal, Bigshare, etc.).',
     },
   ],
 
@@ -97,7 +97,11 @@ for the user. Judge the meaning, not keywords:
 - An attachment named like "Offer_Letter.pdf" or "Appointment Letter" is strong evidence of an
   offer.
 - Emails about the user's investments (dividends) are judged on their own: the job rules
-  above don't apply to them.
+  above don't apply to them. Only a confirmation that money was paid or credited counts as
+  Dividends. Emails sent BEFORE payment are None: dividend declared or recommended, record
+  date announcements, "dividend will be paid", TDS communications or requests to submit
+  Form 15G / 15H / 10F, KYC or bank-detail update requests, unclaimed dividend or IEPF
+  notices, AGM notices and e-voting.
 - When genuinely unsure whether an email is positive progress on the user's application,
   choose Jobs/Interview: a false alarm costs the user a glance, a miss can cost them the job.
 `,
@@ -156,6 +160,10 @@ for the user. Judge the meaning, not keywords:
   // anywhere in your mailbox, without re-sorting everything else. Use it to
   // catch up on one kind of email, e.g. 'dividend newer_than:1y'.
   SEARCH_TO_SORT: 'dividend newer_than:1y',
+  // recheckMatchingEmails() re-checks emails matching this search even if they
+  // already have a label, and removes the AutoSort label from ones that no
+  // longer fit. Use it after changing a category's description.
+  SEARCH_TO_RECHECK: 'label:autosort-dividends',
 
   // ---------------------------------------------------------------------------
   // Phone alerts. Your Telegram bot token / chat ID or ntfy topic are NOT
