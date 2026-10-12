@@ -32,8 +32,15 @@ function loadScript({ fetchResponse, props = { ANTHROPIC_API_KEY: 'test-key' } }
   return { context, fetchCalls, warnings };
 }
 
-function fakeMessage({ from, subject = '', body = '', date = new Date() }) {
-  return { getFrom: () => from, getSubject: () => subject, getPlainBody: () => body, getDate: () => date };
+function fakeMessage({ id = 'm1', from, subject = '', body = '', date = new Date(), attachments = [] }) {
+  return {
+    getId: () => id,
+    getFrom: () => from,
+    getSubject: () => subject,
+    getPlainBody: () => body,
+    getDate: () => date,
+    getAttachments: () => attachments.map((name) => ({ getName: () => name })),
+  };
 }
 
 const fakeThread = { getId: () => 'thread123' };
@@ -55,7 +62,7 @@ function claudeSays(category) {
 const tests = {
   'VIP sender rule matches by domain without calling Claude'() {
     const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('None') });
-    vm.runInContext("CONFIG.RULES[0].from = ['@dream-company.com']", context);
+    vm.runInContext("CONFIG.RULES = [{ label: 'VIP', from: ['@dream-company.com'] }]", context);
     const msg = fakeMessage({ from: 'Jane <jane@dream-company.com>', subject: 'Hello' });
     const result = vm.runInContext('classify_', context)(msg);
     assert.strictEqual(result.category.label, 'VIP');
@@ -63,7 +70,7 @@ const tests = {
     assert.strictEqual(fetchCalls.length, 0);
   },
 
-  'empty VIP list matches nothing, so portal replies still reach Claude'() {
+  'portal replies from non-alert senders reach Claude'() {
     const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('Jobs/Interview') });
     const msg = fakeMessage({ from: 'Naukri <info@naukri.com>', subject: 'You have been shortlisted' });
     const result = vm.runInContext('classify_', context)(msg);
@@ -71,13 +78,35 @@ const tests = {
     assert.strictEqual(fetchCalls.length, 1);
   },
 
-  'portal alert subdomains are caught by the free Job Alerts rule'() {
-    const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('None') });
+  'known alert senders go to Job Alerts and are archived without calling Claude'() {
+    const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('Jobs/Interview') });
     const msg = fakeMessage({ from: 'Indeed <donotreply@jobalert.indeed.com>', subject: '20 more jobs' });
     const result = vm.runInContext('classify_', context)(msg);
-    assert.strictEqual(result.category.label, 'Job Alerts');
+    assert.strictEqual(result.category.label, 'Jobs/Job Alerts');
     assert.strictEqual(result.category.archive, true);
+    assert.strictEqual(result.source, 'rule');
     assert.strictEqual(fetchCalls.length, 0);
+  },
+
+  'Claude sees earlier thread messages and attachment names'() {
+    const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('Jobs/Offer Letter') });
+    const first = fakeMessage({ id: 'a', from: 'HR <hr@acme.com>', body: 'Can you join on 1 Nov? Offer attached.' });
+    const latest = fakeMessage({ id: 'b', from: 'HR <hr@acme.com>', body: 'Reminder', attachments: ['Offer_Letter.pdf'] });
+    const thread = { getMessages: () => [first, latest] };
+    const result = vm.runInContext('classify_', context)(latest, thread);
+    assert.strictEqual(result.category.label, 'Jobs/Offer Letter');
+    const prompt = fetchCalls[0].payload.messages[0].content;
+    assert.match(prompt, /<earlier_messages_in_thread>[\s\S]*Can you join on 1 Nov/);
+    assert.match(prompt, /Attachments: Offer_Letter\.pdf/);
+  },
+
+  'quoted replies, links and blank space are stripped before Claude reads it'() {
+    const { context } = loadScript();
+    const clean = vm.runInContext('cleanBody_', context);
+    const body =
+      'Hi Yash,\r\n\r\n\r\nPlease take the test: https://hackerrank.com/t/abc?utm=xyz\r\n' +
+      '> old quoted line\r\n\r\nOn Mon, 12 Oct 2026 at 10:00, Acme <hr@acme.com>\r\nwrote:\r\n> earlier email';
+    assert.strictEqual(clean(body), 'Hi Yash,\n\nPlease take the test: [link]');
   },
 
   'rule with from + keywords needs both to match'() {
@@ -99,6 +128,7 @@ const tests = {
     const result = vm.runInContext('classify_', context)(msg);
     assert.strictEqual(result.category.label, 'Jobs/Interview');
     assert.strictEqual(result.source, 'claude');
+    assert.strictEqual(result.reason, 'test');
 
     const { url, options, payload } = fetchCalls[0];
     assert.strictEqual(url, 'https://api.anthropic.com/v1/messages');
@@ -107,8 +137,9 @@ const tests = {
     // Haiku doesn't support server-side fallbacks, so neither is sent.
     assert.strictEqual(payload.fallbacks, undefined);
     assert.strictEqual(options.headers['anthropic-beta'], undefined);
+    assert.strictEqual(payload.output_config.effort, 'medium');
     assert.deepStrictEqual(payload.output_config.format.schema.properties.category.enum, [
-      'Jobs/Offer', 'Jobs/Interview', 'Jobs/Rejected', 'Jobs/Applied', 'Jobs/Recruiter Outreach', 'Job Alerts', 'None',
+      'Jobs/Applied', 'Jobs/Interview', 'Jobs/Offer Letter', 'Jobs/Rejected', 'Jobs/Job Alerts', 'None',
     ]);
   },
 
@@ -184,6 +215,41 @@ const tests = {
     const { context, warnings } = loadScript({ fetchResponse: { status: 500, body: {} }, props: { NTFY_TOPIC: 't' } });
     vm.runInContext('notify_', context)(fakeThread, fakeMessage({ from: 'a@b.com' }), interview);
     assert.match(warnings[0], /ntfy alert failed: ntfy returned 500/);
+  },
+
+  'cleanUpOldLabels moves Offer and Job Alerts emails, removes unused labels'() {
+    const { context } = loadScript();
+    const labels = {};
+    const makeLabel = (name, threads = []) => {
+      labels[name] = { getName: () => name, getThreads: () => threads, deleteLabel: () => delete labels[name] };
+      return labels[name];
+    };
+    const thread = (inInbox) => {
+      const t = { added: [], moved: false, isInInbox: () => inInbox };
+      t.addLabel = (l) => t.added.push(l.getName());
+      t.moveToInbox = () => (t.moved = true);
+      return t;
+    };
+    const offerThread = thread(true);
+    const alertThread = thread(false);
+    ['AutoSort', 'AutoSort/Jobs', 'AutoSort/Jobs/Applied', 'AutoSort/Jobs/Interview', 'AutoSort/Jobs/Rejected', 'AutoSort/VIP', 'Personal']
+      .forEach((n) => makeLabel(n));
+    makeLabel('AutoSort/Jobs/Offer', [offerThread]);
+    makeLabel('AutoSort/Job Alerts', [alertThread]);
+    context.GmailApp = {
+      getUserLabels: () => Object.values(labels),
+      getUserLabelByName: (n) => labels[n] || null,
+      createLabel: (n) => makeLabel(n),
+    };
+
+    vm.runInContext('cleanUpOldLabels', context)();
+    assert.deepStrictEqual(Object.keys(labels).sort(), [
+      'AutoSort', 'AutoSort/Jobs', 'AutoSort/Jobs/Applied', 'AutoSort/Jobs/Interview',
+      'AutoSort/Jobs/Job Alerts', 'AutoSort/Jobs/Offer Letter', 'AutoSort/Jobs/Rejected', 'Personal',
+    ]);
+    assert.deepStrictEqual(offerThread.added, ['AutoSort/Jobs/Offer Letter']);
+    assert.deepStrictEqual(alertThread.added, ['AutoSort/Jobs/Job Alerts']);
+    assert.strictEqual(alertThread.moved, false);
   },
 
   'sender address is extracted from display-name format'() {

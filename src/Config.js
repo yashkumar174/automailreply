@@ -1,48 +1,107 @@
 /**
  * AutoSort configuration. This is the only file you need to edit.
  *
- * How an email gets sorted:
- *   1. RULES are checked top to bottom. The first rule that matches wins.
- *   2. If no rule matches, Claude reads the email and picks one of AI_CATEGORIES
- *      (or none, in which case the email is left alone).
+ * Claude reads every new email and files job emails under five labels:
  *
- * Every category becomes a Gmail label under LABEL_PREFIX, e.g. "AutoSort/Jobs/Interview".
+ *   AutoSort/Jobs/Applied        AutoSort/Jobs/Interview
+ *   AutoSort/Jobs/Offer Letter   AutoSort/Jobs/Rejected
+ *   AutoSort/Jobs/Job Alerts
  *
- * Options you can put on any rule or AI category:
+ * Everything else (newsletters, social media, personal mail...) is left alone.
+ *
+ * Options you can put on a category or rule:
  *   star: true       -> star the email
  *   important: true  -> mark the thread Important
- *   archive: true    -> move it out of the inbox (still findable under its label)
  *   notify: true     -> send a phone alert (Telegram or ntfy; see README)
+ *   archive: true    -> move it out of the inbox (still findable under its label)
  */
 const CONFIG = {
   LABEL_PREFIX: 'AutoSort',
 
   // ---------------------------------------------------------------------------
-  // RULES: free, instant, predictable. Use them for senders you already know.
-  //
-  //   from:     matches if the sender's address contains any of these
-  //             (a full address like 'hr@acme.com' or a domain like '@acme.com')
-  //   keywords: matches if the subject or body contains any of these (case-insensitive)
-  //
-  // If a rule has both `from` and `keywords`, BOTH must match.
+  // The job labels. Claude picks one of these, or none.
   // ---------------------------------------------------------------------------
-  RULES: [
+  AI_CATEGORIES: [
     {
-      // OPTIONAL. You don't need this to catch job replies: Claude reads every
-      // email no rule matched, whoever sent it. Add addresses here only for
-      // people you already know you never want to miss, e.g.
-      //   from: ['priya.recruiter@gmail.com', '@dream-company.com'],
-      label: 'VIP',
-      from: [],
+      label: 'Jobs/Applied',
+      description:
+        "Confirmation that the user's application was received or submitted, or a status update " +
+        'with no decision yet ("under review", "application viewed by the employer").',
+    },
+    {
+      label: 'Jobs/Interview',
+      description:
+        "The user's application moved forward: interview invite or scheduling, phone screen, " +
+        'online assessment / coding test / assignment, shortlisted or selected for the next round, ' +
+        'cleared a round, or a recruiter asking for availability, documents or details to proceed.',
       star: true,
       important: true,
       notify: true,
     },
     {
-      // Automated job-board alerts: useful, but they bury the real replies.
-      // Only addresses that send nothing but alerts belong here, because
-      // matching mail is archived without Claude reading it.
-      label: 'Job Alerts',
+      label: 'Jobs/Offer Letter',
+      description:
+        'An actual job or internship offer to the user: offer letter, "pleased to offer you", ' +
+        'salary/CTC or stipend offered, joining date, or onboarding and background checks after an offer.',
+      star: true,
+      important: true,
+      notify: true,
+    },
+    {
+      label: 'Jobs/Rejected',
+      description:
+        "The user's application was declined: \"unfortunately\", \"not moving forward\", " +
+        '"position has been filled", "decided to go with other candidates", even when softened ' +
+        'with "we will keep your resume on file".',
+    },
+    {
+      // Labeled but kept in the inbox, so a misread real update is never hidden.
+      // Known alert-only senders (RULES below) are also moved out of the inbox.
+      label: 'Jobs/Job Alerts',
+      description:
+        'Automated job listings or recommendations not tied to one of the user\'s applications: ' +
+        'job alerts, "jobs you may like", "N new jobs matching your profile", hiring drives or ' +
+        'recruiter mass mailers sent to many people.',
+    },
+  ],
+
+  // How Claude should think about borderline emails. Edit to taste.
+  AI_GUIDE: `
+The user is a job seeker who applies to many jobs and internships, mostly through job portals
+(Naukri, LinkedIn, Indeed, Internshala, Foundit, Glassdoor) and company career sites (Workday,
+Greenhouse, Lever, SuccessFactors, etc.). Your job is to make sure no real update about the
+user's OWN applications gets lost.
+
+Read the whole email, and any earlier messages from the same thread, and decide what it means
+for the user. Judge the meaning, not keywords:
+- First ask: is this about a specific application the user made, or a specific company moving
+  forward with the user? If not, it is never Applied, Interview, Offer Letter or Rejected,
+  even when it contains words like "interview", "selected" or "offer". Job listings and
+  recommendations sent to many people are Jobs/Job Alerts. Newsletters, courses, webinars,
+  career tips, premium upsells and profile-view notices are None.
+- "Congratulations" alone is not an offer. Shortlisting or clearing a round is Jobs/Interview;
+  Jobs/Offer Letter needs an actual offer.
+- Test or assessment links (HackerRank, HackerEarth, Codility, Mettl, etc.), assignments,
+  "fill this form to proceed" and "share your availability" are Jobs/Interview.
+- A short reply in an ongoing conversation with a recruiter (for example "Sure, Tuesday 3 PM
+  works") belongs to whatever stage the thread is at, so use the earlier messages.
+- An attachment named like "Offer_Letter.pdf" or "Appointment Letter" is strong evidence of an
+  offer.
+- When genuinely unsure whether an email is positive progress on the user's application,
+  choose Jobs/Interview: a false alarm costs the user a glance, a miss can cost them the job.
+`,
+
+  // ---------------------------------------------------------------------------
+  // Sender rules, checked before Claude (free and instant). The first match wins.
+  // `from` matches the sender's address; `keywords` match the subject or body.
+  // With both, both must match.
+  // ---------------------------------------------------------------------------
+  RULES: [
+    {
+      // Senders that only ever send job alerts: labeled and moved out of the
+      // inbox without asking Claude. Don't add senders that also send real
+      // application updates.
+      label: 'Jobs/Job Alerts',
       from: [
         'jobalerts-noreply@linkedin.com',
         'jobs-listings@linkedin.com',
@@ -53,57 +112,8 @@ const CONFIG = {
       ],
       archive: true,
     },
-  ],
-
-  // ---------------------------------------------------------------------------
-  // AI_CATEGORIES: Claude picks one of these for emails no rule matched.
-  // The description is what Claude reads to decide, so make it specific.
-  // ---------------------------------------------------------------------------
-  AI_CATEGORIES: [
-    {
-      label: 'Jobs/Offer',
-      description: 'A job offer, offer letter, or compensation/joining details for a role the user applied to.',
-      star: true,
-      important: true,
-      notify: true,
-    },
-    {
-      label: 'Jobs/Interview',
-      description:
-        'Positive progress on a job application: interview invitation or scheduling, phone screen, ' +
-        'online assessment or coding test, "we would like to move forward", selected or shortlisted for the ' +
-        'next round (including job-portal notifications like Naukri or LinkedIn saying so), or a recruiter ' +
-        'asking for availability or more information to continue the process.',
-      star: true,
-      important: true,
-      notify: true,
-    },
-    {
-      label: 'Jobs/Rejected',
-      description:
-        'A job application was declined: "unfortunately", "not moving forward", "position filled", ' +
-        '"decided to pursue other candidates".',
-    },
-    {
-      label: 'Jobs/Applied',
-      description:
-        'Automatic confirmation that a job application was received or submitted, with no decision yet.',
-    },
-    {
-      label: 'Jobs/Recruiter Outreach',
-      description:
-        'A specific recruiter or hiring manager personally contacting the user about a role they have ' +
-        'not applied to yet. Not automated job recommendations or "jobs you may like" lists.',
-    },
-    {
-      // Catches alerts from portals and addresses the Job Alerts rule doesn't
-      // list. Labeled but kept in the inbox, so a misread email is never hidden.
-      label: 'Job Alerts',
-      description:
-        'Automated job listings or recommendations from a job portal (Naukri, Indeed, LinkedIn, ' +
-        'Internshala, Glassdoor, etc.): "jobs matching your profile", "new jobs for you", ' +
-        '"immediate requirement" mailers, job alert digests.',
-    },
+    // A person you never want to miss, for example:
+    // { label: 'VIP', from: ['priya.recruiter@gmail.com', '@dream-company.com'], star: true, notify: true },
   ],
 
   // ---------------------------------------------------------------------------
@@ -114,9 +124,13 @@ const CONFIG = {
   // Cheap and good enough for sorting email. For the most accurate (and ~40x
   // pricier) option, use 'claude-opus-5-5' (see README, "Cost").
   CLAUDE_MODEL: 'claude-haiku-5-5',
-  // Only the first part of long emails is sent to Claude. The decision almost
-  // always sits at the top, and this keeps newsletters from costing extra.
+  // How hard Claude thinks about each email: 'low', 'medium' or 'high'.
+  AI_EFFORT: 'medium',
+  // How much of each email Claude reads, after quoted replies, long links and
+  // blank space are stripped out.
   MAX_BODY_CHARS: 6000,
+  // Earlier messages from the same thread Claude sees for context.
+  THREAD_CONTEXT_MESSAGES: 2,
 
   // ---------------------------------------------------------------------------
   // Scheduling
