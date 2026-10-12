@@ -1,0 +1,13 @@
+{
+  "name": "autosort-gmail",
+  "version": "1.0.0",
+  "description": "Sorts Gmail job-application replies into labels with Claude, and sends phone alerts for interviews and offers.",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/run-tests.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
