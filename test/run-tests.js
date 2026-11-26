@@ -394,6 +394,20 @@ const tests = {
     assert.ok(Number(props.AUTOSORT_PAUSED_UNTIL) > Date.now() + 2 * 3600 * 1000);
   },
 
+  'startFromNow skips the backlog and clears any pause without touching Gmail'() {
+    const props = {
+      AUTOSORT_LAST_RUN: String(Date.now() - 20 * 24 * 3600 * 1000),
+      AUTOSORT_PAUSED_UNTIL: String(Date.now() + 3600 * 1000),
+      AUTOSORT_FAILURES: '3',
+    };
+    const { context } = loadScript();
+    context.PropertiesService = { getScriptProperties: () => fakeProps(props) };
+    const before = Date.now();
+    vm.runInContext('startFromNow', context)();
+    assert.ok(Number(props.AUTOSORT_LAST_RUN) >= before);
+    assert.ok(!('AUTOSORT_PAUSED_UNTIL' in props) && !('AUTOSORT_FAILURES' in props));
+  },
+
   'sender address is extracted from display-name format'() {
     const { context } = loadScript();
     const senderAddress = vm.runInContext('senderAddress_', context);

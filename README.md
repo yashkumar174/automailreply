@@ -131,6 +131,7 @@ see them), and in the Gmail app under **☰**. Interview and Offer emails are al
 | `sortRecentEmails` | Sorts the last `BACKFILL_DAYS` days. |
 | `sortMatchingEmails` | Sorts older emails matching a Gmail search (`SEARCH_TO_SORT`), e.g. all dividend notices from the past year. |
 | `recheckMatchingEmails` | Re-checks already-labeled emails (`SEARCH_TO_RECHECK`) against your current `Config` and removes labels that no longer fit. |
+| `startFromNow` | Skips any backlog: only emails arriving from now on are sorted. Doesn't read Gmail. |
 | `stop` | Stops the timer. Labels already applied stay. |
 | `testNotification` | Sends a test phone alert. |
 | `findTelegramChatId` | Telegram setup helper. |

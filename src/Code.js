@@ -7,6 +7,7 @@
  *   sortRecentEmails()      sort the last CONFIG.BACKFILL_DAYS days of inbox mail
  *   sortMatchingEmails()    sort older emails matching CONFIG.SEARCH_TO_SORT
  *   recheckMatchingEmails() re-check labeled emails matching CONFIG.SEARCH_TO_RECHECK
+ *   startFromNow()          skip any backlog; only sort mail arriving from now on
  *   stop()                  remove the timer
  *   cleanUpOldLabels()      remove AutoSort labels that are no longer in Config
  *   testNotification()      send a test alert to your phone
@@ -57,6 +58,19 @@ function setup() {
     (props.getProperty(TELEGRAM_TOKEN_PROP) && props.getProperty(TELEGRAM_CHAT_PROP)) ||
     props.getProperty(NTFY_TOPIC_PROP);
   if (!alertsOn) console.log('Phone alerts are off. See README, "Phone alerts", to turn them on.');
+}
+
+/**
+ * Skips any backlog: from now on only emails arriving after this moment are
+ * sorted. Older mail is left exactly as it is. Doesn't read Gmail, so it works
+ * even when Gmail's daily limit is used up.
+ */
+function startFromNow() {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(LAST_RUN_PROP, String(Date.now()));
+  props.deleteProperty(PAUSED_UNTIL_PROP);
+  props.deleteProperty(FAILURES_PROP);
+  console.log(`AutoSort will only sort emails that arrive after ${new Date()}.`);
 }
 
 function stop() {
