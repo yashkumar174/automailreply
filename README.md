@@ -76,8 +76,10 @@ flowchart LR
 - **Answers are constrained.** Claude must reply with one of your labels or "None" in a
   fixed JSON format, plus a one-sentence reason that's written to the log, so you can
   see why every email was labeled the way it was.
-- **Nothing gets skipped.** Emails are processed oldest first. If Claude is down or rate
-  limited, the run stops and the same emails are retried 10 minutes later.
+- **Nothing gets skipped.** Emails are processed oldest first. If the Claude API fails
+  (outage, bad key, no credit), the run stops at that email and AutoSort waits before
+  retrying: 20 minutes, then 40, up to 6 hours. That way it doesn't re-read your mail all
+  day and run into Gmail's daily limit. A backlog is caught up 6 hours of mail at a time.
 
 ---
 
@@ -104,7 +106,7 @@ few dollars of credit.
    and click **Run**. Google asks for permission to read and label your Gmail. You'll see
    an "unverified app" screen because you're running your own script: click
    **Advanced → Go to AutoSort (unsafe) → Allow**. The **Execution log** then shows how
-   your recent emails *would* be sorted, without changing anything:
+   the last day's emails *would* be sorted, without changing anything:
 
    ```
    AutoSort/Jobs/Interview [claude: invites you to a HackerRank test for the SDE role] Acme <no-reply@greenhouse.io> | Next steps
@@ -124,8 +126,8 @@ see them), and in the Gmail app under **☰**. Interview and Offer emails are al
 
 | Function | What it does |
 |---|---|
-| `setup` | Creates the labels and starts the timer. Run again after changing `Config`. |
-| `previewRecentEmails` | Shows how recent emails would be sorted. Changes nothing. |
+| `setup` | Creates the labels and starts the timer. Run again after changing `Config`, or to retry right away after AutoSort paused itself. |
+| `previewRecentEmails` | Shows how the last day's emails would be sorted. Changes nothing. |
 | `sortRecentEmails` | Sorts the last `BACKFILL_DAYS` days. |
 | `sortMatchingEmails` | Sorts older emails matching a Gmail search (`SEARCH_TO_SORT`), e.g. all dividend notices from the past year. |
 | `recheckMatchingEmails` | Re-checks already-labeled emails (`SEARCH_TO_RECHECK`) against your current `Config` and removes labels that no longer fit. |
@@ -248,7 +250,9 @@ To remove AutoSort completely: run `stop`, delete the project at
 | Log says `no rule, no API key` | The script property must be named exactly `ANTHROPIC_API_KEY`. |
 | `Claude API returned 401` | The API key is wrong or was deleted. |
 | `Claude API returned 400` mentioning credit | Add credit in the Anthropic console. |
-| `Claude API returned 429` or `529` | Rate limit or overload. The run stops and retries in 10 minutes; nothing is skipped. |
+| `Claude API returned 429` or `529` | Rate limit or overload. AutoSort pauses and retries later; nothing is skipped. |
+| `Service invoked too many times for one day: gmail` | Gmail's daily read limit (about 20,000 reads per account) is used up. AutoSort pauses for 3 hours at a time until it refills, within 24 hours. Nothing is skipped. |
+| Log says `Paused until ...` | AutoSort hit an error and is waiting before trying again, so it doesn't keep re-reading your mail. Fix the cause, then run `setup` to retry right away. |
 | `Address unavailable: https://ntfy.sh` | ntfy is refusing Google's servers. Use Telegram. |
 | An email got the wrong label | Check its reason in **Executions**, then add a line to `AI_GUIDE`. |
 | A label caught emails you don't want there | Tighten that category's `description` (and `AI_GUIDE`), set `SEARCH_TO_RECHECK` to e.g. `'label:autosort-dividends'`, and run `recheckMatchingEmails`. |

@@ -20,7 +20,13 @@ const API_KEY_PROP = 'ANTHROPIC_API_KEY';
 const NTFY_TOPIC_PROP = 'NTFY_TOPIC';
 const TELEGRAM_TOKEN_PROP = 'TELEGRAM_BOT_TOKEN';
 const TELEGRAM_CHAT_PROP = 'TELEGRAM_CHAT_ID';
-const DAY_MS = 24 * 60 * 60 * 1000;
+const PAUSED_UNTIL_PROP = 'AUTOSORT_PAUSED_UNTIL';
+const FAILURES_PROP = 'AUTOSORT_FAILURES';
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+// When catching up on a backlog, each run reads at most this much mail time,
+// so a long backlog can't use up Gmail's daily read quota.
+const CATCH_UP_WINDOW_MS = 6 * HOUR_MS;
 // Apps Script kills a run after 6 minutes; stop early and continue next run.
 const TIME_BUDGET_MS = 4.5 * 60 * 1000;
 
@@ -36,6 +42,9 @@ function setup() {
 
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty(LAST_RUN_PROP)) props.setProperty(LAST_RUN_PROP, String(Date.now()));
+  // Retry straight away after you've fixed whatever paused it.
+  props.deleteProperty(PAUSED_UNTIL_PROP);
+  props.deleteProperty(FAILURES_PROP);
 
   console.log(`AutoSort is on: checking your inbox every ${CONFIG.RUN_EVERY_MINUTES} minutes.`);
   if (CONFIG.AI_ENABLED && !props.getProperty(API_KEY_PROP)) {
@@ -59,10 +68,41 @@ function stop() {
 function sortInbox() {
   withLock_(() => {
     const props = PropertiesService.getScriptProperties();
+    const pausedUntil = Number(props.getProperty(PAUSED_UNTIL_PROP)) || 0;
+    if (Date.now() < pausedUntil) {
+      console.log(`Paused until ${new Date(pausedUntil)} after errors. Run setup to retry now.`);
+      return;
+    }
+
     const since = Number(props.getProperty(LAST_RUN_PROP)) || Date.now() - DAY_MS;
-    const sortedUpTo = sortSince_(since, { dryRun: false });
-    props.setProperty(LAST_RUN_PROP, String(sortedUpTo));
+    let result;
+    try {
+      result = sortSince_(since, { dryRun: false, maxWindowMs: CATCH_UP_WINDOW_MS });
+    } catch (err) {
+      if (!/too many times/i.test(err.message)) throw err;
+      // Gmail's daily read quota is used up. Retrying every few minutes can't
+      // help, so wait; the quota refills within 24 hours.
+      pause_(props, 3 * 60, `Gmail's daily limit was reached (${err.message})`);
+      return;
+    }
+
+    props.setProperty(LAST_RUN_PROP, String(result.sortedUpTo));
+    if (result.apiError) {
+      // Back off 20 min, 40 min, ... up to 6 hours, so a broken key or empty
+      // credit balance doesn't re-read the same emails all day.
+      const failures = (Number(props.getProperty(FAILURES_PROP)) || 0) + 1;
+      props.setProperty(FAILURES_PROP, String(failures));
+      pause_(props, Math.min(10 * 2 ** failures, 6 * 60), 'the Claude API returned an error');
+    } else {
+      props.deleteProperty(FAILURES_PROP);
+      props.deleteProperty(PAUSED_UNTIL_PROP);
+    }
   });
+}
+
+function pause_(props, minutes, why) {
+  props.setProperty(PAUSED_UNTIL_PROP, String(Date.now() + minutes * 60 * 1000));
+  console.warn(`Pausing AutoSort for ${minutes} minutes because ${why}. Run setup to retry sooner.`);
 }
 
 /** Sorts older inbox mail. Anything left over is finished by the next timer runs. */
@@ -74,9 +114,9 @@ function sortRecentEmails() {
   sortInbox();
 }
 
-/** Logs what would happen to recent emails without labeling anything. */
+/** Logs how the last day's inbox emails would be sorted, without labeling anything. */
 function previewRecentEmails() {
-  sortSince_(Date.now() - CONFIG.BACKFILL_DAYS * DAY_MS, { dryRun: true });
+  sortSince_(Date.now() - DAY_MS, { dryRun: true });
 }
 
 /**
@@ -104,13 +144,14 @@ function sortSearch_(query, { recheck }) {
   const pending = [];
   searchThreads_(query).forEach((thread) => {
     if (!recheck && thread.getLabels().some((l) => l.getName().startsWith(prefix))) return;
-    const theirs = thread.getMessages().filter((m) => !m.isDraft() && !mine.includes(senderAddress_(m)));
-    if (theirs.length) pending.push({ thread, message: theirs[theirs.length - 1] });
+    const messages = thread.getMessages();
+    const theirs = messages.filter((m) => !m.isDraft() && !mine.includes(senderAddress_(m)));
+    if (theirs.length) pending.push({ thread, messages, message: theirs[theirs.length - 1] });
   });
   pending.sort((a, b) => a.message.getDate() - b.message.getDate());
 
   console.log(`"${query}": ${pending.length} email(s) to ${recheck ? 're-check' : 'sort'}.`);
-  const done = sortEmails_(pending, { dryRun: false, recheck });
+  const { done } = sortEmails_(pending, { dryRun: false, recheck });
   if (done < pending.length) {
     console.log(`Run ${recheck ? 'recheckMatchingEmails' : 'sortMatchingEmails'} again to finish the rest.`);
   }
@@ -121,29 +162,33 @@ function sortSearch_(query, { recheck }) {
 // ----------------------------------------------------------------------------
 
 /**
- * Sorts inbox emails received after `since` (ms timestamp), oldest first.
- * Returns the timestamp it got through, so the next run continues from there.
+ * Sorts inbox emails received after `since` (ms timestamp), oldest first,
+ * looking at most `maxWindowMs` of mail time ahead. Returns { sortedUpTo,
+ * apiError }: the timestamp it got through, so the next run continues from
+ * there, and whether it stopped on a Claude API error.
  */
-function sortSince_(since, { dryRun }) {
+function sortSince_(since, { dryRun, maxWindowMs = Infinity }) {
   const startedAt = Date.now();
-  const { emails, until } = findNewEmails_(since, startedAt);
+  const { emails, until } = findNewEmails_(since, Math.min(startedAt, since + maxWindowMs), startedAt);
   if (emails.length > 0) {
     console.log(`${emails.length} new email(s) to sort${dryRun ? ' (preview only)' : ''}.`);
   }
 
-  const done = sortEmails_(emails, { dryRun });
+  const { done, apiError } = sortEmails_(emails, { dryRun });
   if (done < emails.length) {
-    return done === 0 ? since : emails[done - 1].message.getDate().getTime();
+    const sortedUpTo = done === 0 ? since : emails[done - 1].message.getDate().getTime();
+    return { sortedUpTo, apiError };
   }
-  // Everything up to `until` is sorted. If the search had to be narrowed
-  // (lots of mail), the next run continues from there.
-  return until >= startedAt ? startedAt : until;
+  // Everything up to `until` is sorted. If the window was capped or narrowed
+  // (a backlog, or lots of mail), the next run continues from there.
+  return { sortedUpTo: until >= startedAt ? startedAt : until, apiError };
 }
 
 /**
- * Classifies and labels each { thread, message }, oldest first. Stops early on
- * the per-run limit, the time limit or a Claude API error, and returns how many
- * it finished, so the rest can be retried.
+ * Classifies and labels each { thread, messages, message }, oldest first.
+ * Stops early on the per-run limit, the time limit or a Claude API error, and
+ * returns { done, apiError }: how many it finished, so the rest can be
+ * retried, and whether it stopped on an API error.
  */
 function sortEmails_(pending, { dryRun, recheck = false }) {
   const startedAt = Date.now();
@@ -151,18 +196,18 @@ function sortEmails_(pending, { dryRun, recheck = false }) {
     const outOfTime = Date.now() - startedAt > TIME_BUDGET_MS;
     if (i >= CONFIG.MAX_EMAILS_PER_RUN || outOfTime) {
       console.log(`Stopping after ${i} emails; the rest will be sorted next run.`);
-      return i;
+      return { done: i, apiError: false };
     }
 
-    const { thread, message } = pending[i];
+    const { thread, messages, message } = pending[i];
     let result;
     try {
-      result = classify_(message, thread);
+      result = classify_(message, messages);
     } catch (err) {
-      // Usually a Claude API outage or rate limit. Don't skip the email:
-      // stop here and retry it on the next run.
+      // A Claude API error (bad key, no credit, outage). Don't skip the email:
+      // stop here and retry it later.
       console.error(`Could not sort "${message.getSubject()}": ${err.message}`);
-      return i;
+      return { done: i, apiError: true };
     }
 
     const where = result.category ? labelName_(result.category) : '(left alone)';
@@ -175,22 +220,22 @@ function sortEmails_(pending, { dryRun, recheck = false }) {
       removeAutoSortLabels_(thread);
     }
   }
-  return pending.length;
+  return { done: pending.length, apiError: false };
 }
 
 // Gmail search returns at most this many threads per query here.
 const MAX_SEARCH_THREADS = 500;
 
 /**
- * Latest unsorted message per inbox thread that arrived after `since`, oldest
- * first. Gmail search returns newest threads first, so if more than
- * MAX_SEARCH_THREADS match, the time window is halved until they fit; the
- * oldest emails are never dropped. Returns the emails and the end of the
- * window they cover.
+ * Latest unsorted message per inbox thread that arrived after `since` and up
+ * to `end` (`now` is the current time), oldest first. Gmail search returns newest threads first, so if
+ * more than MAX_SEARCH_THREADS match, the time window is halved until they
+ * fit; the oldest emails are never dropped. Returns the emails and the end of
+ * the window they cover.
  */
-function findNewEmails_(since, now) {
+function findNewEmails_(since, end, now) {
   const toSeconds = (ms) => Math.floor(ms / 1000);
-  let until = now;
+  let until = end;
   let threads;
   for (;;) {
     // Gmail's after:/before: are in seconds; widen by a minute and filter precisely below.
@@ -203,11 +248,12 @@ function findNewEmails_(since, now) {
   const mine = myAddresses_();
   const emails = [];
   threads.forEach((thread) => {
-    const fresh = thread.getMessages().filter((m) => {
+    const messages = thread.getMessages();
+    const fresh = messages.filter((m) => {
       const t = m.getDate().getTime();
       return t > since && t <= until && !m.isDraft() && !mine.includes(senderAddress_(m));
     });
-    if (fresh.length) emails.push({ thread, message: fresh[fresh.length - 1] });
+    if (fresh.length) emails.push({ thread, messages, message: fresh[fresh.length - 1] });
   });
   emails.sort((a, b) => a.message.getDate() - b.message.getDate());
   return { emails, until };
@@ -234,9 +280,10 @@ function myAddresses_() {
 
 /**
  * Returns { category, source, reason } where category is a CONFIG entry or null.
- * `thread` is optional; when given, Claude also sees earlier messages from it.
+ * `threadMessages` (the thread's messages, oldest first) is optional; when
+ * given, Claude also sees the ones before `message`.
  */
-function classify_(message, thread) {
+function classify_(message, threadMessages) {
   const email = {
     from: message.getFrom(),
     address: senderAddress_(message),
@@ -255,13 +302,12 @@ function classify_(message, thread) {
   const apiKey = PropertiesService.getScriptProperties().getProperty(API_KEY_PROP);
   if (!apiKey) return { category: null, source: 'no rule, no API key' };
 
-  const earlier = thread ? earlierMessages_(thread, message) : [];
+  const earlier = threadMessages ? earlierMessages_(threadMessages, message) : [];
   return { ...classifyWithClaude_(email, earlier, apiKey), source: 'claude' };
 }
 
 /** Up to CONFIG.THREAD_CONTEXT_MESSAGES messages before `message`, shortened. */
-function earlierMessages_(thread, message) {
-  const all = thread.getMessages();
+function earlierMessages_(all, message) {
   const index = all.findIndex((m) => m.getId() === message.getId());
   if (index <= 0 || CONFIG.THREAD_CONTEXT_MESSAGES <= 0) return [];
   return all.slice(Math.max(0, index - CONFIG.THREAD_CONTEXT_MESSAGES), index).map((m) => ({

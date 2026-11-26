@@ -43,6 +43,14 @@ function fakeMessage({ id = 'm1', from, subject = '', body = '', date = new Date
   };
 }
 
+function fakeProps(store) {
+  return {
+    getProperty: (k) => (k in store ? store[k] : null),
+    setProperty: (k, v) => (store[k] = v),
+    deleteProperty: (k) => delete store[k],
+  };
+}
+
 const fakeThread = { getId: () => 'thread123' };
 const interview = { label: 'Jobs/Interview', notify: true };
 
@@ -92,8 +100,7 @@ const tests = {
     const { context, fetchCalls } = loadScript({ fetchResponse: claudeSays('Jobs/Offer Letter') });
     const first = fakeMessage({ id: 'a', from: 'HR <hr@acme.com>', body: 'Can you join on 1 Nov? Offer attached.' });
     const latest = fakeMessage({ id: 'b', from: 'HR <hr@acme.com>', body: 'Reminder', attachments: ['Offer_Letter.pdf'] });
-    const thread = { getMessages: () => [first, latest] };
-    const result = vm.runInContext('classify_', context)(latest, thread);
+    const result = vm.runInContext('classify_', context)(latest, [first, latest]);
     assert.strictEqual(result.category.label, 'Jobs/Offer Letter');
     const prompt = fetchCalls[0].payload.messages[0].content;
     assert.match(prompt, /<earlier_messages_in_thread>[\s\S]*Can you join on 1 Nov/);
@@ -278,7 +285,7 @@ const tests = {
       },
     };
 
-    const { emails, until } = vm.runInContext('findNewEmails_', context)(since, now);
+    const { emails, until } = vm.runInContext('findNewEmails_', context)(since, now, now);
     assert.ok(until < now, 'window should have been narrowed');
     assert.ok(emails.length > 0 && emails.length < 500);
     // The very oldest email is included, and the list is oldest first.
@@ -333,6 +340,58 @@ const tests = {
     vm.runInContext('recheckMatchingEmails', context)();
     assert.strictEqual(searched, 'label:autosort-dividends');
     assert.deepStrictEqual(labels, ['Personal']);
+  },
+
+  'a backlog is caught up 6 hours at a time'() {
+    const props = { ANTHROPIC_API_KEY: 'k', AUTOSORT_LAST_RUN: String(Date.now() - 3 * 24 * 3600 * 1000) };
+    const { context } = loadScript({ fetchResponse: claudeSays('None'), props });
+    const since = Number(props.AUTOSORT_LAST_RUN);
+    const queries = [];
+    context.PropertiesService = { getScriptProperties: () => fakeProps(props) };
+    context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+    context.Session = { getActiveUser: () => ({ getEmail: () => 'me@gmail.com' }) };
+    context.GmailApp = { getAliases: () => [], search: (q) => (queries.push(q), []) };
+
+    vm.runInContext('sortInbox', context)();
+    assert.match(queries[0], /before:/);
+    assert.strictEqual(Number(props.AUTOSORT_LAST_RUN), since + 6 * 3600 * 1000);
+  },
+
+  'a Claude API error pauses the timer instead of re-reading Gmail every run'() {
+    const props = { ANTHROPIC_API_KEY: 'k', AUTOSORT_LAST_RUN: String(Date.now() - 3600 * 1000) };
+    const { context } = loadScript({ fetchResponse: { status: 401, body: { error: 'bad key' } }, props });
+    const msg = { ...fakeMessage({ from: 'hr@acme.com', date: new Date(Date.now() - 1000) }), isDraft: () => false };
+    const thread = { getMessages: () => [msg] };
+    let searches = 0;
+    context.PropertiesService = { getScriptProperties: () => fakeProps(props) };
+    context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+    context.Session = { getActiveUser: () => ({ getEmail: () => 'me@gmail.com' }) };
+    context.GmailApp = { getAliases: () => [], search: () => (searches++, [thread]) };
+
+    const sortInbox = vm.runInContext('sortInbox', context);
+    sortInbox();
+    assert.ok(Number(props.AUTOSORT_PAUSED_UNTIL) > Date.now() + 15 * 60 * 1000);
+    assert.strictEqual(props.AUTOSORT_FAILURES, '1');
+    const searchesAfterFirstRun = searches;
+    sortInbox();
+    assert.strictEqual(searches, searchesAfterFirstRun, 'paused run must not touch Gmail');
+  },
+
+  "Gmail's daily limit pauses the timer for a few hours"() {
+    const props = { ANTHROPIC_API_KEY: 'k', AUTOSORT_LAST_RUN: String(Date.now() - 3600 * 1000) };
+    const { context } = loadScript({ props });
+    context.PropertiesService = { getScriptProperties: () => fakeProps(props) };
+    context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+    context.Session = { getActiveUser: () => ({ getEmail: () => 'me@gmail.com' }) };
+    context.GmailApp = {
+      getAliases: () => [],
+      search: () => {
+        throw new Error('Service invoked too many times for one day: gmail.');
+      },
+    };
+
+    vm.runInContext('sortInbox', context)();
+    assert.ok(Number(props.AUTOSORT_PAUSED_UNTIL) > Date.now() + 2 * 3600 * 1000);
   },
 
   'sender address is extracted from display-name format'() {
